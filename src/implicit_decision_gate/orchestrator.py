@@ -88,21 +88,23 @@ class Orchestrator:
     def answer(self, run_id: str, option: RolloutOption) -> RunRecord:
         """Persist the one typed owner answer without invoking a model."""
 
-        run = self.store.load(run_id)
-        answer_owner(run, option)
-        self.store.save(run)
-        return run
+        with self.store.lock(run_id):
+            run = self.store.load(run_id)
+            answer_owner(run, option)
+            self.store.save(run)
+            return run
 
     def resume(self, run_id: str) -> RunRecord:
         """Execute attempt two from a ready persisted run."""
 
-        run = self.store.load(run_id)
-        if run.state is not RunState.READY_TO_RESUME:
-            raise GateError(f"resume requires READY_TO_RESUME, found {run.state}")
-        self._require_execution_dependencies()
-        if self._model_name() != run.model_name:
-            raise GateError(f"IDG_MODEL must remain {run.model_name!r} when resuming this run")
-        return self._execute_or_fail(run, attempt_number=2)
+        with self.store.lock(run_id):
+            run = self.store.load(run_id)
+            if run.state is not RunState.READY_TO_RESUME:
+                raise GateError(f"resume requires READY_TO_RESUME, found {run.state}")
+            self._require_execution_dependencies()
+            if self._model_name() != run.model_name:
+                raise GateError(f"IDG_MODEL must remain {run.model_name!r} when resuming this run")
+            return self._execute_or_fail(run, attempt_number=2)
 
     def show(self, run_id: str) -> str:
         """Render the persisted run summary without model execution."""

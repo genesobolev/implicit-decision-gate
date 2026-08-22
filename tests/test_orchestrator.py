@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,37 @@ from implicit_decision_gate.gate import (
 )
 from implicit_decision_gate.orchestrator import Orchestrator
 from tests.conftest import ScriptMarkerProbe
+
+RESUME_SCRIPT = """
+import sys
+from pathlib import Path
+
+from implicit_decision_gate.agent import ModelResponse, ScriptedModelClient
+from implicit_decision_gate.gate import GateError, RunState
+from implicit_decision_gate.orchestrator import Orchestrator
+from tests.conftest import ScriptMarkerProbe
+
+try:
+    run = Orchestrator(
+        repo_path=Path(sys.argv[1]),
+        model_name="scripted-model",
+        coding_client=ScriptedModelClient(
+            [
+                ModelResponse.function_call(
+                    "submit_migration",
+                    {"sql": "-- PRESERVE_EXISTING"},
+                )
+            ]
+        ),
+        reviewer_client=ScriptedModelClient([]),
+        probe=ScriptMarkerProbe(),
+        worktree_root=Path(sys.argv[3]),
+    ).resume(sys.argv[2])
+except GateError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(2) from error
+raise SystemExit(0 if run.state is RunState.COMPLETED else 3)
+"""
 
 
 def submit(sql: str, call_id: str = "submit") -> ModelResponse:
@@ -67,6 +100,20 @@ def orchestrator(
     )
 
 
+def wait_for_processes(
+    processes: list[subprocess.Popen[str]],
+) -> list[tuple[str, str]]:
+    """Collect subprocess output and clean up every child on timeout."""
+
+    try:
+        return [process.communicate(timeout=30) for process in processes]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+
 def test_awaiting_owner_persists_and_blocks_model_calls(
     reference_repo: Path,
     tmp_path: Path,
@@ -95,6 +142,106 @@ def test_awaiting_owner_persists_and_blocks_model_calls(
     persisted = RunStore(reference_repo).load(run.run_id)
     assert persisted.state is RunState.AWAITING_OWNER
     assert persisted.coding_attempt_count == 1
+
+
+def test_concurrent_answers_accept_exactly_one_owner_decision(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    run = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
+        ScriptedModelClient([not_evidenced()]),
+        ScriptMarkerProbe(),
+    ).start(Path("examples/share-link-expiration/brief.md"))
+    store = RunStore(reference_repo)
+    commands = [
+        [
+            sys.executable,
+            "-m",
+            "implicit_decision_gate.cli",
+            "answer",
+            run.run_id,
+            "--option",
+            option.value,
+        ]
+        for option in (
+            RolloutOption.PRESERVE_EXISTING,
+            RolloutOption.EXPIRE_EXISTING,
+        )
+    ]
+
+    with store.lock(run.run_id):
+        processes = [
+            subprocess.Popen(
+                command,
+                cwd=reference_repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for command in commands
+        ]
+        assert all(process.poll() is None for process in processes)
+    outputs = wait_for_processes(processes)
+
+    assert sorted(process.wait() for process in processes) == [0, 2]
+    success_index = next(
+        index for index, process in enumerate(processes) if process.returncode == 0
+    )
+    successful_answer = json.loads(outputs[success_index][0])
+    persisted = store.load(run.run_id)
+    assert persisted.state is RunState.READY_TO_RESUME
+    assert persisted.owner_answer_count == 1
+    assert persisted.owner_option == RolloutOption(successful_answer["owner_option"])
+    assert "answer requires AWAITING_OWNER" in "".join(stderr for _, stderr in outputs)
+
+
+def test_concurrent_resumes_execute_attempt_two_once(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    run = orchestrator(
+        reference_repo,
+        tmp_path / "first-worktree",
+        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
+        ScriptedModelClient([not_evidenced()]),
+        ScriptMarkerProbe(),
+    ).start(Path("examples/share-link-expiration/brief.md"))
+    Orchestrator(repo_path=reference_repo).answer(
+        run.run_id,
+        RolloutOption.PRESERVE_EXISTING,
+    )
+    store = RunStore(reference_repo)
+    command = [
+        sys.executable,
+        "-c",
+        RESUME_SCRIPT,
+        str(reference_repo),
+        run.run_id,
+        str(tmp_path / "second-worktrees"),
+    ]
+
+    with store.lock(run.run_id):
+        processes = [
+            subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(2)
+        ]
+        assert all(process.poll() is None for process in processes)
+    outputs = wait_for_processes(processes)
+
+    assert sorted(process.wait() for process in processes) == [0, 2]
+    persisted = store.load(run.run_id)
+    assert persisted.state is RunState.COMPLETED
+    assert persisted.coding_attempt_count == 2
+    assert len(persisted.attempts) == 2
+    assert "resume requires READY_TO_RESUME" in "".join(stderr for _, stderr in outputs)
 
 
 def test_scripted_run_accepts_opposite_option_and_completes(

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -186,6 +189,20 @@ class RunStore:
         path = self.run_path(run.run_id)
         path.mkdir(parents=True, exist_ok=False)
         self.save(run)
+
+    @contextmanager
+    def lock(self, run_id: str) -> Iterator[None]:
+        """Hold the cross-process mutation lock for one existing run."""
+
+        path = self.run_path(run_id)
+        if not path.is_dir():
+            raise GateError(f"Run does not exist: {run_id}")
+        with (path / ".run.lock").open("a", encoding="utf-8") as file_handle:
+            fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
 
     def save(self, run: RunRecord) -> None:
         """Persist a run using a temporary file and atomic rename."""
