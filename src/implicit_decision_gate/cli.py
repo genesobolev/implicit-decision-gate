@@ -8,8 +8,16 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from implicit_decision_gate.agent import OpenAIModelClient
-from implicit_decision_gate.gate import GateError, RolloutOption, RunState, render_show
+from implicit_decision_gate.agent import DemoScriptedModelClient, ModelClient
+from implicit_decision_gate.codex_client import CodexCLIModelClient
+from implicit_decision_gate.gate import (
+    AgentBackend,
+    GateError,
+    RolloutOption,
+    RunState,
+    RunStore,
+    render_show,
+)
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import PostgresProbe
 from implicit_decision_gate.worktree import WorktreeError
@@ -24,6 +32,12 @@ def _parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="Start a new gate run")
     start.add_argument("--repo", type=Path, required=True)
     start.add_argument("--brief", type=Path, required=True)
+    start.add_argument(
+        "--agent",
+        choices=[backend.value for backend in AgentBackend],
+        default=AgentBackend.SCRIPTED.value,
+        help="Model backend (default: scripted)",
+    )
 
     show = subparsers.add_parser("show", help="Show a persisted run")
     show.add_argument("run_id")
@@ -44,21 +58,23 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _execution_orchestrator(repo_path: Path) -> Orchestrator:
-    model_name = os.environ.get("IDG_MODEL")
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not model_name:
-        raise GateError("IDG_MODEL is required")
-    if not api_key:
-        raise GateError("OPENAI_API_KEY is required")
+def _execution_orchestrator(repo_path: Path, agent_backend: AgentBackend) -> Orchestrator:
     worktree_value = os.environ.get("IDG_WORKTREE_DIR")
     worktree_root = Path(worktree_value).resolve() if worktree_value else None
     admin_dsn = os.environ.get("IDG_POSTGRES_ADMIN_DSN", DEFAULT_ADMIN_DSN)
+    coding_client: ModelClient
+    reviewer_client: ModelClient
+    if agent_backend is AgentBackend.SCRIPTED:
+        coding_client = DemoScriptedModelClient()
+        reviewer_client = DemoScriptedModelClient()
+    else:
+        coding_client = CodexCLIModelClient()
+        reviewer_client = CodexCLIModelClient()
     return Orchestrator(
         repo_path=repo_path,
-        model_name=model_name,
-        coding_client=OpenAIModelClient(api_key),
-        reviewer_client=OpenAIModelClient(api_key),
+        agent_backend=agent_backend,
+        coding_client=coding_client,
+        reviewer_client=reviewer_client,
         probe=PostgresProbe(admin_dsn),
         worktree_root=worktree_root,
     )
@@ -70,7 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
         if arguments.command == "start":
-            orchestrator = _execution_orchestrator(arguments.repo)
+            agent_backend = AgentBackend(arguments.agent)
+            orchestrator = _execution_orchestrator(arguments.repo, agent_backend)
             run = orchestrator.start(arguments.brief)
             print(render_show(run))
             return 1 if run.state is RunState.FAILED else 0
@@ -85,7 +102,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_show(run))
             return 0
         if arguments.command == "resume":
-            run = _execution_orchestrator(repo_path).resume(arguments.run_id)
+            stored_run = RunStore(repo_path).load(arguments.run_id)
+            run = _execution_orchestrator(repo_path, stored_run.agent_backend).resume(
+                arguments.run_id
+            )
             print(render_show(run))
             return 1 if run.state is RunState.FAILED else 0
         raise GateError(f"Unknown command: {arguments.command}")

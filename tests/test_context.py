@@ -9,7 +9,7 @@ from implicit_decision_gate.agent import (
     ModelResponse,
     ScriptedModelClient,
 )
-from implicit_decision_gate.gate import AttemptRecord, RolloutOption
+from implicit_decision_gate.gate import AgentBackend, AttemptRecord, RolloutOption
 
 
 def attempt(worktree: Path) -> AttemptRecord:
@@ -20,7 +20,7 @@ def attempt(worktree: Path) -> AttemptRecord:
         worktree_path=str(worktree),
         base_commit="a" * 40,
         clean_start_verified=True,
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
     )
 
 
@@ -45,7 +45,7 @@ def test_read_file_rejects_paths_outside_allowlist(tmp_path: Path) -> None:
         ]
     )
     trace = attempt(tmp_path)
-    proposal = CodingAgent(client, "scripted-model").propose(
+    proposal = CodingAgent(client).propose(
         brief="brief",
         attempt=trace,
         worktree_path=tmp_path,
@@ -74,9 +74,9 @@ def test_attempt_two_prompt_contains_only_brief_and_owner_decision(tmp_path: Pat
         worktree_path=str(tmp_path),
         base_commit="a" * 40,
         clean_start_verified=True,
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
     )
-    CodingAgent(client, "scripted-model").propose(
+    CodingAgent(client).propose(
         brief="ORIGINAL_BRIEF",
         attempt=trace,
         worktree_path=tmp_path,

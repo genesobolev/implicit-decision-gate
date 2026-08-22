@@ -7,9 +7,8 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
-from openai import APIConnectionError, APITimeoutError, OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from implicit_decision_gate.gate import (
@@ -41,7 +40,7 @@ class ModelTransportError(AgentError):
 
 @dataclass(frozen=True)
 class ModelToolCall:
-    """A normalized Responses API function call."""
+    """A normalized model tool call."""
 
     call_id: str
     name: str
@@ -50,7 +49,7 @@ class ModelToolCall:
 
 @dataclass(frozen=True)
 class ModelResponse:
-    """Model output independent of a concrete SDK client."""
+    """Model output independent of a concrete backend."""
 
     output_text: str = ""
     tool_calls: list[ModelToolCall] = field(default_factory=list)
@@ -96,54 +95,13 @@ class ModelResponse:
 class ModelClient(Protocol):
     """Minimal client interface shared by live and scripted calls."""
 
-    def complete(self, request: dict[str, Any]) -> ModelResponse:
+    def complete(
+        self,
+        request: dict[str, Any],
+        *,
+        working_directory: Path | None = None,
+    ) -> ModelResponse:
         """Execute one model request."""
-
-
-class OpenAIModelClient:
-    """Responses API adapter with SDK retries disabled."""
-
-    def __init__(self, api_key: str) -> None:
-        self._client = OpenAI(api_key=api_key, max_retries=0)
-
-    def complete(self, request: dict[str, Any]) -> ModelResponse:
-        """Execute and normalize one OpenAI Responses API call."""
-
-        arguments: dict[str, Any] = {
-            "model": request["model"],
-            "input": request["input"],
-        }
-        if request.get("tools"):
-            arguments["tools"] = request["tools"]
-        if "tool_choice" in request:
-            arguments["tool_choice"] = request["tool_choice"]
-        if "parallel_tool_calls" in request:
-            arguments["parallel_tool_calls"] = request["parallel_tool_calls"]
-        try:
-            response = self._client.responses.create(**arguments)
-        except (APIConnectionError, APITimeoutError) as error:
-            raise ModelTransportError(str(error)) from error
-        except OpenAIError as error:
-            raise AgentError(str(error)) from error
-
-        raw = cast(dict[str, Any], response.model_dump(mode="json"))
-        raw_items = cast(list[Any], response.output)
-        output_items = [cast(dict[str, Any], item.model_dump(mode="json")) for item in raw_items]
-        tool_calls = [
-            ModelToolCall(
-                call_id=cast(str, item["call_id"]),
-                name=cast(str, item["name"]),
-                arguments=cast(str, item["arguments"]),
-            )
-            for item in output_items
-            if item.get("type") == "function_call"
-        ]
-        return ModelResponse(
-            output_text=response.output_text,
-            tool_calls=tool_calls,
-            output_items=output_items,
-            raw=raw,
-        )
 
 
 class ScriptedModelClient:
@@ -153,9 +111,15 @@ class ScriptedModelClient:
         self.responses = list(responses)
         self.requests: list[dict[str, Any]] = []
 
-    def complete(self, request: dict[str, Any]) -> ModelResponse:
+    def complete(
+        self,
+        request: dict[str, Any],
+        *,
+        working_directory: Path | None = None,
+    ) -> ModelResponse:
         """Return the next scripted response or exception."""
 
+        del working_directory
         self.requests.append(copy.deepcopy(request))
         if not self.responses:
             raise AgentError("The scripted model response queue is empty")
@@ -163,6 +127,60 @@ class ScriptedModelClient:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+PRESERVE_EXISTING_MIGRATION = """\
+-- PRESERVE_EXISTING
+ALTER TABLE public.share_links
+    ADD COLUMN expires_at timestamp with time zone;
+
+ALTER TABLE public.share_links
+    ALTER COLUMN expires_at
+    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
+"""
+
+EXPIRE_EXISTING_MIGRATION = """\
+-- EXPIRE_EXISTING
+ALTER TABLE public.share_links
+    ADD COLUMN expires_at timestamp with time zone;
+
+UPDATE public.share_links
+SET expires_at = CURRENT_TIMESTAMP + interval '30 days';
+
+ALTER TABLE public.share_links
+    ALTER COLUMN expires_at
+    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
+"""
+
+
+class DemoScriptedModelClient:
+    """Deterministic public demo backend that exercises the real gate workflow."""
+
+    def complete(
+        self,
+        request: dict[str, Any],
+        *,
+        working_directory: Path | None = None,
+    ) -> ModelResponse:
+        """Return a stable migration or evidence result for the reference scenario."""
+
+        del working_directory
+        if request.get("tools"):
+            owner_option = request.get("owner_option")
+            migration = (
+                PRESERVE_EXISTING_MIGRATION
+                if owner_option == RolloutOption.PRESERVE_EXISTING.value
+                else EXPIRE_EXISTING_MIGRATION
+            )
+            return ModelResponse.function_call("submit_migration", {"sql": migration})
+        return ModelResponse.text(
+            json.dumps(
+                {
+                    "classification": "NOT_EVIDENCED",
+                    "evidence_quote": None,
+                }
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -238,9 +256,8 @@ def _coding_input(
 class CodingAgent:
     """Run a coding model through the two allowlisted tools."""
 
-    def __init__(self, client: ModelClient, model_name: str) -> None:
+    def __init__(self, client: ModelClient) -> None:
         self.client = client
-        self.model_name = model_name
 
     def propose(
         self,
@@ -258,13 +275,19 @@ class CodingAgent:
         submitted: CodingProposal | None = None
         while submitted is None:
             request: dict[str, Any] = {
-                "model": self.model_name,
                 "input": copy.deepcopy(input_items),
                 "tools": CODING_TOOLS,
                 "tool_choice": "required",
                 "parallel_tool_calls": False,
+                "attempt_number": attempt.number,
+                "owner_option": owner_option.value if owner_option is not None else None,
             }
-            response = self._complete_with_retry(request, attempt, persist)
+            response = self._complete_with_retry(
+                request,
+                attempt,
+                persist,
+                working_directory=worktree_path,
+            )
             input_items.extend(copy.deepcopy(response.output_items))
             if not response.tool_calls:
                 raise AgentError("The coding model stopped without submitting a migration")
@@ -313,6 +336,8 @@ class CodingAgent:
         request: dict[str, Any],
         attempt: AttemptRecord,
         persist: Callable[[], None],
+        *,
+        working_directory: Path,
     ) -> ModelResponse:
         for transport_attempt in range(MAX_TRANSPORT_RETRIES_PER_CALL + 1):
             traced_request = copy.deepcopy(request)
@@ -320,7 +345,10 @@ class CodingAgent:
             attempt.model_requests.append(traced_request)
             persist()
             try:
-                response = self.client.complete(request)
+                response = self.client.complete(
+                    request,
+                    working_directory=working_directory,
+                )
             except ModelTransportError as error:
                 if transport_attempt >= MAX_TRANSPORT_RETRIES_PER_CALL:
                     raise AgentLimitError("Model transport retry limit exceeded") from error
@@ -422,9 +450,8 @@ def _reviewer_input(brief: str, option: RolloutOption) -> list[dict[str, str]]:
 class EvidenceReviewer:
     """Run a fresh evidence-only model context and validate its quote."""
 
-    def __init__(self, client: ModelClient, model_name: str) -> None:
+    def __init__(self, client: ModelClient) -> None:
         self.client = client
-        self.model_name = model_name
 
     def review(
         self,
@@ -437,7 +464,6 @@ class EvidenceReviewer:
         """Review one modeled rollout without exposing migration material."""
 
         request: dict[str, Any] = {
-            "model": self.model_name,
             "input": _reviewer_input(brief, option),
         }
         run.reviewer_request = copy.deepcopy(request)

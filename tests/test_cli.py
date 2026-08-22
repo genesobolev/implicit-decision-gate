@@ -5,11 +5,53 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from implicit_decision_gate.agent import ModelResponse, ScriptedModelClient
 from implicit_decision_gate.cli import main
-from implicit_decision_gate.gate import RunState
+from implicit_decision_gate.gate import AgentBackend, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from tests.conftest import ScriptMarkerProbe
+
+
+def test_scripted_cli_runs_without_credentials(
+    reference_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exercise the public scripted start, answer, and resume workflow."""
+
+    monkeypatch.chdir(reference_repo)
+    monkeypatch.setattr(
+        "implicit_decision_gate.cli.PostgresProbe",
+        lambda _dsn: ScriptMarkerProbe(),
+    )
+
+    assert (
+        main(
+            [
+                "start",
+                "--repo",
+                ".",
+                "--brief",
+                "examples/share-link-expiration/brief.md",
+            ]
+        )
+        == 0
+    )
+    started = json.loads(capsys.readouterr().out)
+    assert started["state"] == "AWAITING_OWNER"
+    assert started["agent_backend"] == "scripted"
+
+    run_id = started["run_id"]
+    assert main(["answer", run_id, "--option", "PRESERVE_EXISTING"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "READY_TO_RESUME"
+
+    assert main(["resume", run_id]) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["state"] == "COMPLETED"
+    assert completed["owner_option"] == "PRESERVE_EXISTING"
+    assert completed["agent_backend"] == "scripted"
 
 
 def test_show_and_answer_work_without_model_environment(
@@ -31,7 +73,7 @@ def test_show_and_answer_work_without_model_environment(
     )
     run = Orchestrator(
         repo_path=reference_repo,
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
         coding_client=coding,
         reviewer_client=reviewer,
         probe=ScriptMarkerProbe(),

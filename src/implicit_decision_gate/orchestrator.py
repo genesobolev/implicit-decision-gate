@@ -13,6 +13,7 @@ from implicit_decision_gate.agent import (
 )
 from implicit_decision_gate.gate import (
     MAX_CODING_ATTEMPTS,
+    AgentBackend,
     AttemptRecord,
     DecisionLedgerRecord,
     GateError,
@@ -40,7 +41,7 @@ class Orchestrator:
         self,
         *,
         repo_path: Path,
-        model_name: str | None = None,
+        agent_backend: AgentBackend | None = None,
         coding_client: ModelClient | None = None,
         reviewer_client: ModelClient | None = None,
         probe: MigrationProbe | None = None,
@@ -48,7 +49,7 @@ class Orchestrator:
     ) -> None:
         self.repo_path = repo_path.resolve()
         self.store = RunStore(self.repo_path)
-        self.model_name = model_name
+        self.agent_backend = agent_backend
         self.coding_client = coding_client
         self.reviewer_client = reviewer_client
         self.probe = probe
@@ -80,7 +81,7 @@ class Orchestrator:
             original_brief=brief,
             brief_digest=sha256_text(brief),
             base_commit=base_commit,
-            model_name=self._model_name(),
+            agent_backend=self._agent_backend(),
         )
         self.store.create(run)
         return self._execute_or_fail(run, attempt_number=1)
@@ -102,8 +103,10 @@ class Orchestrator:
             if run.state is not RunState.READY_TO_RESUME:
                 raise GateError(f"resume requires READY_TO_RESUME, found {run.state}")
             self._require_execution_dependencies()
-            if self._model_name() != run.model_name:
-                raise GateError(f"IDG_MODEL must remain {run.model_name!r} when resuming this run")
+            if self._agent_backend() is not run.agent_backend:
+                raise GateError(
+                    f"Agent backend must remain {run.agent_backend.value!r} when resuming this run"
+                )
             return self._execute_or_fail(run, attempt_number=2)
 
     def show(self, run_id: str) -> str:
@@ -140,7 +143,7 @@ class Orchestrator:
             worktree_path=str(worktree.path),
             base_commit=worktree.base_commit,
             clean_start_verified=worktree.clean_start_verified,
-            model_name=run.model_name,
+            agent_backend=run.agent_backend,
         )
         run.attempts.append(attempt)
         run.coding_attempt_count += 1
@@ -149,7 +152,7 @@ class Orchestrator:
         def persist() -> None:
             self.store.save(run)
 
-        coding_agent = CodingAgent(self._coding_client(), run.model_name)
+        coding_agent = CodingAgent(self._coding_client())
         proposal = coding_agent.propose(
             brief=run.original_brief,
             attempt=attempt,
@@ -198,7 +201,7 @@ class Orchestrator:
             run.error = "Attempt one produced an UNMODELED rollout behavior"
             return
 
-        reviewer = EvidenceReviewer(self._reviewer_client(), run.model_name)
+        reviewer = EvidenceReviewer(self._reviewer_client())
         reviewer_result = reviewer.review(
             brief=run.original_brief,
             option=probe_result.rollout_option,
@@ -240,8 +243,8 @@ class Orchestrator:
             run.decision_ledger.state = run.state
 
     def _require_execution_dependencies(self) -> None:
-        if not self.model_name:
-            raise GateError("IDG_MODEL is required for model execution")
+        if self.agent_backend is None:
+            raise GateError("An agent backend is required for model execution")
         if self.coding_client is None:
             raise GateError("A coding model client is required for model execution")
         if self.reviewer_client is None:
@@ -249,10 +252,10 @@ class Orchestrator:
         if self.probe is None:
             raise GateError("A PostgreSQL probe is required for model execution")
 
-    def _model_name(self) -> str:
-        if self.model_name is None:
-            raise GateError("IDG_MODEL is required for model execution")
-        return self.model_name
+    def _agent_backend(self) -> AgentBackend:
+        if self.agent_backend is None:
+            raise GateError("An agent backend is required for model execution")
+        return self.agent_backend
 
     def _coding_client(self) -> ModelClient:
         if self.coding_client is None:

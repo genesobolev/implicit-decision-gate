@@ -14,6 +14,7 @@ from implicit_decision_gate.agent import (
     ScriptedModelClient,
 )
 from implicit_decision_gate.gate import (
+    AgentBackend,
     EvidenceClassification,
     ReviewerResult,
     RolloutOption,
@@ -36,7 +37,7 @@ def make_run(brief: str = BRIEF) -> RunRecord:
         original_brief=brief,
         brief_digest=sha256_text(brief),
         base_commit="b" * 40,
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
     )
 
 
@@ -60,7 +61,7 @@ def test_reference_brief_has_no_evidence_for_either_existing_row_option(
         ]
     )
     run = make_run()
-    result = EvidenceReviewer(client, "scripted-model").review(
+    result = EvidenceReviewer(client).review(
         brief=BRIEF,
         option=option,
         run=run,
@@ -101,7 +102,7 @@ def test_brief_addressing_existing_rows_supports_match_and_contradicts_other(
             )
         ]
     )
-    result = EvidenceReviewer(client, "scripted-model").review(
+    result = EvidenceReviewer(client).review(
         brief=brief,
         option=option,
         run=make_run(brief),

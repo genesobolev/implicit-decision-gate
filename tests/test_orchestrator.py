@@ -16,6 +16,7 @@ from implicit_decision_gate.agent import (
     ScriptedModelClient,
 )
 from implicit_decision_gate.gate import (
+    AgentBackend,
     GateError,
     RolloutOption,
     RunState,
@@ -30,14 +31,14 @@ import sys
 from pathlib import Path
 
 from implicit_decision_gate.agent import ModelResponse, ScriptedModelClient
-from implicit_decision_gate.gate import GateError, RunState
+from implicit_decision_gate.gate import AgentBackend, GateError, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from tests.conftest import ScriptMarkerProbe
 
 try:
     run = Orchestrator(
         repo_path=Path(sys.argv[1]),
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
         coding_client=ScriptedModelClient(
             [
                 ModelResponse.function_call(
@@ -92,7 +93,7 @@ def orchestrator(
 
     return Orchestrator(
         repo_path=repo,
-        model_name="scripted-model",
+        agent_backend=AgentBackend.SCRIPTED,
         coding_client=coding_client,
         reviewer_client=reviewer_client,
         probe=probe,
@@ -142,6 +143,33 @@ def test_awaiting_owner_persists_and_blocks_model_calls(
     persisted = RunStore(reference_repo).load(run.run_id)
     assert persisted.state is RunState.AWAITING_OWNER
     assert persisted.coding_attempt_count == 1
+
+
+def test_resume_rejects_agent_backend_change(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    run = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
+        ScriptedModelClient([not_evidenced()]),
+        ScriptMarkerProbe(),
+    ).start(Path("examples/share-link-expiration/brief.md"))
+    Orchestrator(repo_path=reference_repo).answer(
+        run.run_id,
+        RolloutOption.PRESERVE_EXISTING,
+    )
+
+    with pytest.raises(GateError, match="Agent backend must remain 'scripted'"):
+        Orchestrator(
+            repo_path=reference_repo,
+            agent_backend=AgentBackend.CODEX,
+            coding_client=ScriptedModelClient([]),
+            reviewer_client=ScriptedModelClient([]),
+            probe=ScriptMarkerProbe(),
+            worktree_root=tmp_path / "other-worktrees",
+        ).resume(run.run_id)
 
 
 def test_concurrent_answers_accept_exactly_one_owner_decision(

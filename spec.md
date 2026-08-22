@@ -7,7 +7,7 @@
 For one supported PostgreSQL migration shape, the system must:
 
 1. Accept a high-level brief and Git repository.
-2. Ask a real coding model to create a migration in a detached Git worktree.
+2. Ask the selected coding backend to create a migration in a detached Git worktree.
 3. Execute the migration in a disposable PostgreSQL transaction and normalize its behavior.
 4. Compare the observed existing-row behavior with evidence in the brief.
 5. Enter `AWAITING_OWNER` when that behavior is `NOT_EVIDENCED` or `UNCERTAIN`.
@@ -48,15 +48,15 @@ All other observed behaviors are `UNMODELED`.
 | Component | Responsibility |
 | --- | --- |
 | CLI and orchestrator | Execute commands, enforce state transitions, and persist runs |
-| Coding model | Read allowlisted files and submit one migration per attempt |
+| Coding backend | Read reference files and submit one migration per attempt |
 | Worktree manager | Create one clean detached worktree per attempt |
 | PostgreSQL probe | Execute a migration and normalize observable behavior |
 | Evidence reviewer | Classify support for the observed existing-row behavior |
 | Gate | Convert probe and reviewer results into state transitions |
 
-Use the OpenAI Python SDK for both model calls. Use separate model contexts for the coding model and evidence reviewer. Read the model name from `IDG_MODEL` and the API key from `OPENAI_API_KEY`.
+The default backend is a deterministic scripted demonstration that requires no credentials. The optional `codex` backend invokes an installed Codex CLI in non-interactive mode and reuses its saved local authentication. Each coding-model call and evidence review starts a separate ephemeral Codex process. The application does not accept or read model API keys.
 
-## 4. Coding-model tools
+## 4. Coding-backend tools
 
 Expose two tools:
 
@@ -69,7 +69,7 @@ Requirements:
 
 - `read_file` accepts only paths under `examples/share-link-expiration/` in the current worktree.
 - `submit_migration` writes only under `examples/share-link-expiration/migrations/` in the current worktree.
-- The model has no shell, Git, owner-answer, deployment, browser, or arbitrary filesystem tool.
+- The application exposes only these two normalized tools. Codex runs with a read-only sandbox and returns one schema-constrained tool action; the application performs the migration write.
 - Persist the proposal before executing it.
 - Permit one submitted migration per attempt.
 - Permit at most four model tool steps per attempt.
@@ -201,7 +201,7 @@ Persist:
 - Original brief and SHA-256 digest.
 - Base commit.
 - Worktree path and clean-start verification for each attempt.
-- Model name and prompt version.
+- Agent backend and prompt version.
 - Model requests, responses, and tool calls.
 - Attempt and tool-step counts.
 - Migration contents and digests.
@@ -241,12 +241,15 @@ Run commands from the repository root:
 
 ```bash
 idg start --repo . --brief examples/share-link-expiration/brief.md
+idg start --agent codex --repo . --brief examples/share-link-expiration/brief.md
 idg show RUN_ID
 idg answer RUN_ID --option PRESERVE_EXISTING
 idg resume RUN_ID
 ```
 
 `start` runs until `COMPLETED`, `AWAITING_OWNER`, or `FAILED`.
+
+`start --agent` accepts `scripted` or `codex` and defaults to `scripted`. Persist the selected backend in the run. `resume` automatically reuses it and does not permit a backend change.
 
 `show` prints the current state, observed option, classification, pending question, selected owner option, attempt digests, and final worktree path.
 
@@ -258,12 +261,14 @@ idg resume RUN_ID
 
 ```text
 implicit-decision-gate/
+    README.md
     pyproject.toml
     compose.yaml
     src/implicit_decision_gate/
         __init__.py
         cli.py
         agent.py
+        codex_client.py
         gate.py
         probe.py
         worktree.py
@@ -272,17 +277,18 @@ implicit-decision-gate/
         schema.sql
         migrations/
     tests/
+        test_codex_client.py
         test_probe.py
         test_reviewer.py
         test_orchestrator.py
         test_context.py
 ```
 
-Use Python 3.12, `argparse`, the OpenAI Python SDK, `psycopg`, Pydantic, pytest, Git CLI, and PostgreSQL 17 through Docker Compose.
+Use Python 3.12, `argparse`, `psycopg`, Pydantic, pytest, Git CLI, and PostgreSQL 17 through Docker Compose. Codex mode additionally requires an installed and authenticated Codex CLI on the host.
 
 ## 11. Tests
 
-CI uses a scripted model client. The live-model integration test runs only when `OPENAI_API_KEY` and `IDG_MODEL` are set.
+CI uses a scripted model client. The live-model integration test runs only when `IDG_LIVE_CODEX=1`, Codex is installed and authenticated, and the PostgreSQL container is available.
 
 Required tests:
 
@@ -296,7 +302,7 @@ Required tests:
 8. A scripted run can pause, accept the opposite option, produce a matching second migration, and complete.
 9. A mismatching or `UNMODELED` second migration fails without another model call or owner question.
 10. Tool-step and transport-retry limits terminate the run with `FAILED`.
-11. A live-model run can produce attempt one, pause, accept an owner option, and produce attempt two.
+11. An opt-in local Codex run can produce attempt one, pause, accept an owner option, and produce attempt two.
 
 Assert states, normalized effects, context contents, counters, and digests rather than exact model prose.
 
@@ -305,7 +311,8 @@ Assert states, normalized effects, context contents, counters, and digests rathe
 The implementation is complete when:
 
 - `start`, `show`, `answer`, and `resume` satisfy their contracts.
-- A real coding model writes attempt one in a detached worktree.
+- Scripted mode completes the full workflow without model credentials.
+- Optional Codex mode uses the locally authenticated Codex CLI to produce attempt one in a detached worktree.
 - The probe classifies its existing-row behavior.
 - The reviewer creates one `NOT_EVIDENCED` ledger record for the reference brief.
 - The run persists `AWAITING_OWNER` and blocks model execution.
