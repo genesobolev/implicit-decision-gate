@@ -14,6 +14,7 @@ from implicit_decision_gate.gate import (
     ModelRole,
     ReviewerResult,
 )
+from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN
 from tests.conftest import ScriptMarkerProbe
 
 
@@ -61,12 +62,19 @@ def test_cli_pauses_inspects_answers_and_resumes(
         "implicit_decision_gate.cli.CodexCLIModelClient",
         DeterministicCodexClient,
     )
+    probe_dsns: list[str] = []
+
+    def build_probe(admin_dsn: str) -> ScriptMarkerProbe:
+        probe_dsns.append(admin_dsn)
+        return ScriptMarkerProbe()
+
     monkeypatch.setattr(
         "implicit_decision_gate.cli.PostgresProbe",
-        lambda _dsn: ScriptMarkerProbe(),
+        build_probe,
     )
 
     assert main(["start"]) == 0
+    assert probe_dsns == [COMPOSE_ADMIN_DSN]
     started = json.loads(capsys.readouterr().out)
     assert started["state"] == "AWAITING_OWNER"
     assert "agent_backend" not in started
@@ -103,6 +111,7 @@ def test_cli_pauses_inspects_answers_and_resumes(
     assert answered["decision_request"] is None
 
     assert main(["resume", run_id]) == 0
+    assert probe_dsns == [COMPOSE_ADMIN_DSN, COMPOSE_ADMIN_DSN]
     completed = json.loads(capsys.readouterr().out)
     assert completed["state"] == "COMPLETED"
     assert completed["owner_option"] == "PRESERVE_EXISTING"

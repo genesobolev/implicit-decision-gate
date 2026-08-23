@@ -16,9 +16,9 @@ from implicit_decision_gate.codex_client import (
 )
 from implicit_decision_gate.gate import RolloutOption, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
-from implicit_decision_gate.probe import PostgresProbe
+from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN, PostgresProbe
 from tests.conftest import BRIEF, SCHEMA
-from tests.test_probe import ADMIN_DSN, postgres_available
+from tests.test_probe import postgres_available
 
 LIVE_ENABLED = os.environ.get("IDG_LIVE_CODEX") == "1" and shutil.which("codex") is not None
 
@@ -36,7 +36,7 @@ def test_live_model_honors_preserve_owner_decision() -> None:
     )
 
     migration = CodexCLIModelClient().propose_migration(prompt)
-    result = PostgresProbe(ADMIN_DSN).probe(migration, SCHEMA)
+    result = PostgresProbe(COMPOSE_ADMIN_DSN).probe(migration, SCHEMA)
 
     assert result.rollout_option is RolloutOption.PRESERVE_EXISTING
 
@@ -53,7 +53,7 @@ def test_live_model_can_pause_and_complete_second_attempt(
         repo_path=reference_repo,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
-        probe=PostgresProbe(ADMIN_DSN),
+        probe=PostgresProbe(COMPOSE_ADMIN_DSN),
         worktree_root=tmp_path / "live-worktrees",
     ).start()
     assert first.state is RunState.AWAITING_OWNER
@@ -73,7 +73,7 @@ def test_live_model_can_pause_and_complete_second_attempt(
         repo_path=reference_repo,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
-        probe=PostgresProbe(ADMIN_DSN),
+        probe=PostgresProbe(COMPOSE_ADMIN_DSN),
         worktree_root=tmp_path / "live-worktrees",
     ).resume(first.run_id)
     assert completed.state is RunState.COMPLETED

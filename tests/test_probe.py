@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
 
 from implicit_decision_gate.gate import RolloutOption
-from implicit_decision_gate.probe import Observation, PostgresProbe, normalize_observation
+from implicit_decision_gate.probe import (
+    COMPOSE_ADMIN_DSN,
+    Observation,
+    PostgresProbe,
+    normalize_observation,
+)
 from tests.conftest import SCHEMA
 
-ADMIN_DSN = os.environ.get(
-    "IDG_POSTGRES_ADMIN_DSN",
-    "postgresql://idg_admin:idg_admin@localhost:55432/postgres",
-)
 PRESERVE_MIGRATION = """
 ALTER TABLE public.share_links
     ADD COLUMN expires_at timestamp with time zone;
@@ -34,7 +34,7 @@ def postgres_available() -> bool:
     """Return whether the disposable PostgreSQL container is reachable."""
 
     try:
-        with psycopg.connect(ADMIN_DSN, connect_timeout=1):
+        with psycopg.connect(COMPOSE_ADMIN_DSN, connect_timeout=1):
             return True
     except psycopg.Error:
         return False
@@ -81,7 +81,7 @@ def test_postgres_probe_maps_reference_migrations(
     migration: str,
     expected: RolloutOption,
 ) -> None:
-    result = PostgresProbe(ADMIN_DSN).probe(migration, SCHEMA)
+    result = PostgresProbe(COMPOSE_ADMIN_DSN).probe(migration, SCHEMA)
     assert result.rollout_option is expected
     assert result.rollback_verified is True
     assert result.insert_without_value == "approximately_now_plus_30_days"

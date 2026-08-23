@@ -17,10 +17,8 @@ from implicit_decision_gate.gate import (
     render_show,
 )
 from implicit_decision_gate.orchestrator import Orchestrator
-from implicit_decision_gate.probe import PostgresProbe
+from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN, PostgresProbe
 from implicit_decision_gate.worktree import WorktreeError
-
-DEFAULT_ADMIN_DSN = "postgresql://idg_admin:idg_admin@localhost:55432/postgres"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -48,13 +46,12 @@ def _parser() -> argparse.ArgumentParser:
 def _execution_orchestrator(repo_path: Path) -> Orchestrator:
     worktree_value = os.environ.get("IDG_WORKTREE_DIR")
     worktree_root = Path(worktree_value).resolve() if worktree_value else None
-    admin_dsn = os.environ.get("IDG_POSTGRES_ADMIN_DSN", DEFAULT_ADMIN_DSN)
     client = CodexCLIModelClient()
     return Orchestrator(
         repo_path=repo_path,
         coding_client=client,
         reviewer_client=client,
-        probe=PostgresProbe(admin_dsn),
+        probe=PostgresProbe(COMPOSE_ADMIN_DSN),
         worktree_root=worktree_root,
     )
 
