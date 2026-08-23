@@ -237,7 +237,7 @@ def test_owner_decision_regenerates_in_a_clean_context(
     assert stat.S_IMODE(first_artifact.stat().st_mode) == 0o444
 
     second_prompt = second_client.prompts[0]
-    assert "Owner decision: PRESERVE_EXISTING" in second_prompt
+    assert "Authoritative owner decision: PRESERVE_EXISTING" in second_prompt
     assert "FIRST_MIGRATION_SECRET" not in second_prompt
     assert "NOT_EVIDENCED" not in second_prompt
 

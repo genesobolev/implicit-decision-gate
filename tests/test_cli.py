@@ -16,7 +16,7 @@ class DeterministicCodexClient:
     """Stand in for Codex at the CLI dependency boundary."""
 
     def propose_migration(self, prompt: str) -> str:
-        if "Owner decision: PRESERVE_EXISTING" in prompt:
+        if "Authoritative owner decision: PRESERVE_EXISTING" in prompt:
             return "-- PRESERVE_EXISTING"
         return "-- EXPIRE_EXISTING"
 

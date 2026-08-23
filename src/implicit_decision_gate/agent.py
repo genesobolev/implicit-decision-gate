@@ -11,6 +11,19 @@ from implicit_decision_gate.gate import (
     RolloutOption,
 )
 
+OWNER_ACCEPTANCE_CRITERIA: dict[RolloutOption, str] = {
+    RolloutOption.PRESERVE_EXISTING: (
+        "After migration, the seeded pre-existing row must read expires_at IS NULL. "
+        "In PostgreSQL, adding the column with its non-NULL default in one statement "
+        "would make existing rows read that default, so add the nullable column without "
+        "a default before setting the default for future inserts."
+    ),
+    RolloutOption.EXPIRE_EXISTING: (
+        "After migration, the seeded pre-existing row must read an expires_at value "
+        "approximately 30 days after migration time."
+    ),
+}
+
 
 class AgentError(RuntimeError):
     """Raised for invalid or unsuccessful model behavior."""
@@ -58,8 +71,9 @@ to approximately 30 days from creation.""",
     if attempt_number == 2:
         assert owner_option is not None
         sections.append(
-            f"Owner decision: {owner_option.value}\n"
-            f"Required behavior: {ROLLOUT_DESCRIPTIONS[owner_option]}"
+            f"Authoritative owner decision: {owner_option.value}\n"
+            f"Required behavior: {ROLLOUT_DESCRIPTIONS[owner_option]}\n"
+            f"PostgreSQL acceptance criteria: {OWNER_ACCEPTANCE_CRITERIA[owner_option]}"
         )
     return "\n\n".join(sections)
 
