@@ -8,13 +8,33 @@ from pathlib import Path
 
 import pytest
 
+from implicit_decision_gate.agent import build_coding_prompt
 from implicit_decision_gate.codex_client import CodexCLIModelClient
 from implicit_decision_gate.gate import RolloutOption, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import PostgresProbe
+from tests.conftest import BRIEF, SCHEMA
 from tests.test_probe import ADMIN_DSN, postgres_available
 
 LIVE_ENABLED = os.environ.get("IDG_LIVE_CODEX") == "1" and shutil.which("codex") is not None
+
+
+@pytest.mark.skipif(
+    not LIVE_ENABLED or not postgres_available(),
+    reason="IDG_LIVE_CODEX=1, an authenticated Codex CLI, and PostgreSQL 17 are required",
+)
+def test_live_model_honors_preserve_owner_decision() -> None:
+    prompt = build_coding_prompt(
+        brief=BRIEF,
+        schema=SCHEMA,
+        attempt_number=2,
+        owner_option=RolloutOption.PRESERVE_EXISTING,
+    )
+
+    migration = CodexCLIModelClient().propose_migration(prompt)
+    result = PostgresProbe(ADMIN_DSN).probe(migration, SCHEMA)
+
+    assert result.rollout_option is RolloutOption.PRESERVE_EXISTING
 
 
 @pytest.mark.skipif(
