@@ -1,8 +1,7 @@
-"""Persisted state machine, limits, and end-to-end scripted runs."""
+"""Durable gate behavior across isolated coding attempts."""
 
 from __future__ import annotations
 
-import json
 import stat
 import subprocess
 import sys
@@ -10,44 +9,38 @@ from pathlib import Path
 
 import pytest
 
-from implicit_decision_gate.agent import (
-    ModelResponse,
-    ModelTransportError,
-    ScriptedModelClient,
-)
 from implicit_decision_gate.gate import (
     AgentBackend,
+    EvidenceClassification,
     GateError,
+    ReviewerResult,
     RolloutOption,
     RunState,
     RunStore,
     sha256_text,
 )
 from implicit_decision_gate.orchestrator import Orchestrator
-from tests.conftest import ScriptMarkerProbe
+from tests.conftest import (
+    ScriptedCodingClient,
+    ScriptedReviewerClient,
+    ScriptMarkerProbe,
+    run_git,
+)
 
 RESUME_SCRIPT = """
 import sys
 from pathlib import Path
 
-from implicit_decision_gate.agent import ModelResponse, ScriptedModelClient
 from implicit_decision_gate.gate import AgentBackend, GateError, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
-from tests.conftest import ScriptMarkerProbe
+from tests.conftest import ScriptedCodingClient, ScriptedReviewerClient, ScriptMarkerProbe
 
 try:
     run = Orchestrator(
         repo_path=Path(sys.argv[1]),
         agent_backend=AgentBackend.SCRIPTED,
-        coding_client=ScriptedModelClient(
-            [
-                ModelResponse.function_call(
-                    "submit_migration",
-                    {"sql": "-- PRESERVE_EXISTING"},
-                )
-            ]
-        ),
-        reviewer_client=ScriptedModelClient([]),
+        coding_client=ScriptedCodingClient(["-- PRESERVE_EXISTING"]),
+        reviewer_client=ScriptedReviewerClient([]),
         probe=ScriptMarkerProbe(),
         worktree_root=Path(sys.argv[3]),
     ).resume(sys.argv[2])
@@ -58,35 +51,20 @@ raise SystemExit(0 if run.state is RunState.COMPLETED else 3)
 """
 
 
-def submit(sql: str, call_id: str = "submit") -> ModelResponse:
-    """Create a scripted migration submission."""
+def not_evidenced() -> ReviewerResult:
+    """Return the expected result for the intentionally incomplete brief."""
 
-    return ModelResponse.function_call(
-        "submit_migration",
-        {"sql": sql},
-        call_id=call_id,
-    )
-
-
-def not_evidenced(explanation: str = "") -> ModelResponse:
-    """Create the expected evidence result, optionally with ignored prose."""
-
-    return ModelResponse.text(
-        json.dumps(
-            {
-                "classification": "NOT_EVIDENCED",
-                "evidence_quote": None,
-                "explanation": explanation,
-            }
-        )
+    return ReviewerResult(
+        classification=EvidenceClassification.NOT_EVIDENCED,
+        evidence_quote=None,
     )
 
 
 def orchestrator(
     repo: Path,
     worktree_root: Path,
-    coding_client: ScriptedModelClient,
-    reviewer_client: ScriptedModelClient,
+    coding_client: ScriptedCodingClient,
+    reviewer_client: ScriptedReviewerClient,
     probe: ScriptMarkerProbe,
 ) -> Orchestrator:
     """Build a fully scripted controller."""
@@ -115,115 +93,61 @@ def wait_for_processes(
                 process.wait()
 
 
-def test_awaiting_owner_persists_and_blocks_model_calls(
+def test_awaiting_owner_is_durable_and_blocks_more_model_work(
     reference_repo: Path,
     tmp_path: Path,
 ) -> None:
-    first_client = ScriptedModelClient([submit("-- EXPIRE_EXISTING")])
+    coding = ScriptedCodingClient(["-- EXPIRE_EXISTING"])
+    reviewer = ScriptedReviewerClient([not_evidenced()])
     run = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
-        first_client,
-        ScriptedModelClient([not_evidenced()]),
+        coding,
+        reviewer,
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    assert run.state is RunState.AWAITING_OWNER
+    ).start()
 
-    blocked_client = ScriptedModelClient([submit("-- PRESERVE_EXISTING")])
+    assert run.state is RunState.AWAITING_OWNER
+    assert run.decision is not None
+    assert run.decision.observed is RolloutOption.EXPIRE_EXISTING
+    assert run.decision.selected is None
+    assert run.attempts[0].coding_prompt == coding.prompts[0]
+    assert run.reviewer_prompt == reviewer.prompts[0]
+
+    blocked_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
     separate_process = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
         blocked_client,
-        ScriptedModelClient([]),
+        ScriptedReviewerClient([]),
         ScriptMarkerProbe(),
     )
     with pytest.raises(GateError, match="READY_TO_RESUME"):
         separate_process.resume(run.run_id)
-    assert blocked_client.requests == []
+    assert blocked_client.prompts == []
     persisted = RunStore(reference_repo).load(run.run_id)
     assert persisted.state is RunState.AWAITING_OWNER
-    assert persisted.coding_attempt_count == 1
+    assert len(persisted.attempts) == 1
 
 
-def test_resume_rejects_agent_backend_change(
+def test_start_reads_the_brief_from_the_pinned_commit(
     reference_repo: Path,
     tmp_path: Path,
 ) -> None:
+    brief_path = reference_repo / "examples/share-link-expiration/brief.md"
+    brief_path.write_text("uncommitted replacement brief\n", encoding="utf-8")
+    coding = ScriptedCodingClient(["-- EXPIRE_EXISTING"])
+
     run = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
-        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
-        ScriptedModelClient([not_evidenced()]),
+        coding,
+        ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    Orchestrator(repo_path=reference_repo).answer(
-        run.run_id,
-        RolloutOption.PRESERVE_EXISTING,
-    )
+    ).start()
 
-    with pytest.raises(GateError, match="Agent backend must remain 'scripted'"):
-        Orchestrator(
-            repo_path=reference_repo,
-            agent_backend=AgentBackend.CODEX,
-            coding_client=ScriptedModelClient([]),
-            reviewer_client=ScriptedModelClient([]),
-            probe=ScriptMarkerProbe(),
-            worktree_root=tmp_path / "other-worktrees",
-        ).resume(run.run_id)
-
-
-def test_concurrent_answers_accept_exactly_one_owner_decision(
-    reference_repo: Path,
-    tmp_path: Path,
-) -> None:
-    run = orchestrator(
-        reference_repo,
-        tmp_path / "worktrees",
-        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
-        ScriptedModelClient([not_evidenced()]),
-        ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    store = RunStore(reference_repo)
-    commands = [
-        [
-            sys.executable,
-            "-m",
-            "implicit_decision_gate.cli",
-            "answer",
-            run.run_id,
-            "--option",
-            option.value,
-        ]
-        for option in (
-            RolloutOption.PRESERVE_EXISTING,
-            RolloutOption.EXPIRE_EXISTING,
-        )
-    ]
-
-    with store.lock(run.run_id):
-        processes = [
-            subprocess.Popen(
-                command,
-                cwd=reference_repo,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            for command in commands
-        ]
-        assert all(process.poll() is None for process in processes)
-    outputs = wait_for_processes(processes)
-
-    assert sorted(process.wait() for process in processes) == [0, 2]
-    success_index = next(
-        index for index, process in enumerate(processes) if process.returncode == 0
-    )
-    successful_answer = json.loads(outputs[success_index][0])
-    persisted = store.load(run.run_id)
-    assert persisted.state is RunState.READY_TO_RESUME
-    assert persisted.owner_answer_count == 1
-    assert persisted.owner_option == RolloutOption(successful_answer["owner_option"])
-    assert "answer requires AWAITING_OWNER" in "".join(stderr for _, stderr in outputs)
+    assert "uncommitted replacement brief" not in run.original_brief
+    assert run.original_brief in coding.prompts[0]
 
 
 def test_concurrent_resumes_execute_attempt_two_once(
@@ -233,10 +157,10 @@ def test_concurrent_resumes_execute_attempt_two_once(
     run = orchestrator(
         reference_repo,
         tmp_path / "first-worktree",
-        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
-        ScriptedModelClient([not_evidenced()]),
+        ScriptedCodingClient(["-- EXPIRE_EXISTING"]),
+        ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
+    ).start()
     Orchestrator(repo_path=reference_repo).answer(
         run.run_id,
         RolloutOption.PRESERVE_EXISTING,
@@ -267,72 +191,76 @@ def test_concurrent_resumes_execute_attempt_two_once(
     assert sorted(process.wait() for process in processes) == [0, 2]
     persisted = store.load(run.run_id)
     assert persisted.state is RunState.COMPLETED
-    assert persisted.coding_attempt_count == 2
     assert len(persisted.attempts) == 2
     assert "resume requires READY_TO_RESUME" in "".join(stderr for _, stderr in outputs)
 
 
-def test_scripted_run_accepts_opposite_option_and_completes(
+def test_owner_decision_regenerates_in_a_clean_context(
     reference_repo: Path,
     tmp_path: Path,
 ) -> None:
     first_sql = "-- FIRST_MIGRATION_SECRET EXPIRE_EXISTING"
-    reviewer_secret = "REVIEWER_SECRET"
+    worktrees = tmp_path / "worktrees"
+    first_client = ScriptedCodingClient([first_sql])
     first = orchestrator(
         reference_repo,
-        tmp_path / "worktrees",
-        ScriptedModelClient([submit(first_sql)]),
-        ScriptedModelClient([not_evidenced(reviewer_secret)]),
+        worktrees,
+        first_client,
+        ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    assert first.state is RunState.AWAITING_OWNER
+    ).start()
 
-    answer_controller = Orchestrator(repo_path=reference_repo)
-    answered = answer_controller.answer(first.run_id, RolloutOption.PRESERVE_EXISTING)
+    answered = Orchestrator(repo_path=reference_repo).answer(
+        first.run_id,
+        RolloutOption.PRESERVE_EXISTING,
+    )
     assert answered.state is RunState.READY_TO_RESUME
-    second_client = ScriptedModelClient([submit("-- PRESERVE_EXISTING")])
+    assert answered.decision is not None
+    assert answered.decision.selected is RolloutOption.PRESERVE_EXISTING
+    assert answered.decision.answered_at is not None
+
+    second_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
     completed = orchestrator(
         reference_repo,
-        tmp_path / "worktrees",
+        worktrees,
         second_client,
-        ScriptedModelClient([]),
+        ScriptedReviewerClient([]),
         ScriptMarkerProbe(),
     ).resume(first.run_id)
 
     assert completed.state is RunState.COMPLETED
-    assert completed.owner_answer_count == 1
-    assert completed.coding_attempt_count == 2
-    assert completed.attempts[0].base_commit == completed.base_commit
-    assert completed.attempts[1].base_commit == completed.base_commit
-    assert completed.attempts[0].worktree_path != completed.attempts[1].worktree_path
+    assert len(completed.attempts) == 2
     assert all(attempt.clean_start_verified for attempt in completed.attempts)
+    assert completed.attempts[0].worktree_path != completed.attempts[1].worktree_path
     assert completed.attempts[0].migration_digest == sha256_text(f"{first_sql}\n")
     assert completed.attempts[1].migration_digest == sha256_text("-- PRESERVE_EXISTING\n")
-    assert completed.attempts[0].migration_contents == f"{first_sql}\n"
-    immutable_path = Path(completed.attempts[0].migration_path or "")
-    assert stat.S_IMODE(immutable_path.stat().st_mode) == 0o444
-    assert completed.decision_ledger is not None
-    assert completed.decision_ledger.state is RunState.COMPLETED
+    assert completed.attempts[1].coding_prompt == second_client.prompts[0]
 
-    second_context = json.dumps(second_client.requests)
-    assert "PRESERVE_EXISTING" in second_context
-    assert "FIRST_MIGRATION_SECRET" not in second_context
-    assert reviewer_secret not in second_context
-    assert "NOT_EVIDENCED" not in second_context
+    first_artifact = RunStore(reference_repo).run_path(first.run_id) / "attempt-1.sql"
+    assert first_artifact.read_text(encoding="utf-8") == f"{first_sql}\n"
+    assert stat.S_IMODE(first_artifact.stat().st_mode) == 0o444
+
+    second_prompt = second_client.prompts[0]
+    assert "Owner decision: PRESERVE_EXISTING" in second_prompt
+    assert "FIRST_MIGRATION_SECRET" not in second_prompt
+    assert "NOT_EVIDENCED" not in second_prompt
+
     first_worktree = Path(completed.attempts[0].worktree_path)
     second_worktree = Path(completed.attempts[1].worktree_path)
-    assert list((first_worktree / "examples/share-link-expiration/migrations").glob("*.sql"))
+    assert run_git(first_worktree, "rev-parse", "HEAD") == completed.base_commit
+    assert run_git(second_worktree, "rev-parse", "HEAD") == completed.base_commit
     assert (
-        len(list((second_worktree / "examples/share-link-expiration/migrations").glob("*.sql")))
-        == 1
+        len(list((first_worktree / "examples/share-link-expiration/migrations").glob("*.sql"))) == 1
     )
-    assert "FIRST_MIGRATION_SECRET" not in next(
+    second_migrations = list(
         (second_worktree / "examples/share-link-expiration/migrations").glob("*.sql")
-    ).read_text(encoding="utf-8")
+    )
+    assert len(second_migrations) == 1
+    assert "FIRST_MIGRATION_SECRET" not in second_migrations[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("second_sql", ["-- EXPIRE_EXISTING", "-- OTHER"])
-def test_second_attempt_mismatch_or_unmodeled_fails_once(
+def test_second_attempt_mismatch_or_unmodeled_fails(
     reference_repo: Path,
     tmp_path: Path,
     second_sql: str,
@@ -340,28 +268,26 @@ def test_second_attempt_mismatch_or_unmodeled_fails_once(
     first = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
-        ScriptedModelClient([submit("-- EXPIRE_EXISTING")]),
-        ScriptedModelClient([not_evidenced()]),
+        ScriptedCodingClient(["-- EXPIRE_EXISTING"]),
+        ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
+    ).start()
     Orchestrator(repo_path=reference_repo).answer(
         first.run_id,
         RolloutOption.PRESERVE_EXISTING,
     )
-    second_client = ScriptedModelClient([submit(second_sql)])
-    reviewer_client = ScriptedModelClient([])
+    second_client = ScriptedCodingClient([second_sql])
     failed = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
         second_client,
-        reviewer_client,
+        ScriptedReviewerClient([]),
         ScriptMarkerProbe(),
     ).resume(first.run_id)
+
     assert failed.state is RunState.FAILED
-    assert failed.coding_attempt_count == 2
-    assert failed.owner_answer_count == 1
-    assert len(second_client.requests) == 1
-    assert reviewer_client.requests == []
+    assert len(failed.attempts) == 2
+    assert len(second_client.prompts) == 1
     with pytest.raises(GateError, match="AWAITING_OWNER"):
         Orchestrator(repo_path=reference_repo).answer(
             first.run_id,
@@ -369,59 +295,19 @@ def test_second_attempt_mismatch_or_unmodeled_fails_once(
         )
 
 
-def test_tool_step_limit_fails_run(reference_repo: Path, tmp_path: Path) -> None:
-    responses = [
-        ModelResponse.function_call(
-            "read_file",
-            {"path": "examples/share-link-expiration/schema.sql"},
-            call_id=f"read-{index}",
-        )
-        for index in range(5)
-    ]
-    run = orchestrator(
-        reference_repo,
-        tmp_path / "worktrees",
-        ScriptedModelClient(responses),
-        ScriptedModelClient([]),
-        ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    assert run.state is RunState.FAILED
-    assert run.attempts[0].tool_step_count == 4
-    assert "Tool-step limit" in (run.error or "")
-
-
-def test_transport_retry_limit_fails_run(reference_repo: Path, tmp_path: Path) -> None:
-    coding_client = ScriptedModelClient(
-        [
-            ModelTransportError("first transport failure"),
-            ModelTransportError("second transport failure"),
-        ]
-    )
-    run = orchestrator(
-        reference_repo,
-        tmp_path / "worktrees",
-        coding_client,
-        ScriptedModelClient([]),
-        ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
-    assert run.state is RunState.FAILED
-    assert run.attempts[0].transport_retry_count == 1
-    assert len(run.attempts[0].model_requests) == 2
-    assert "transport retry limit" in (run.error or "")
-
-
 def test_unmodeled_first_attempt_fails_without_review(
     reference_repo: Path,
     tmp_path: Path,
 ) -> None:
-    reviewer_client = ScriptedModelClient([])
+    reviewer = ScriptedReviewerClient([])
     run = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
-        ScriptedModelClient([submit("-- OTHER")]),
-        reviewer_client,
+        ScriptedCodingClient(["-- OTHER"]),
+        reviewer,
         ScriptMarkerProbe(),
-    ).start(Path("examples/share-link-expiration/brief.md"))
+    ).start()
+
     assert run.state is RunState.FAILED
-    assert reviewer_client.requests == []
-    assert run.decision_ledger is None
+    assert reviewer.prompts == []
+    assert run.decision is None

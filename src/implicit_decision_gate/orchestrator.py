@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 
 from implicit_decision_gate.agent import (
-    CodingAgent,
-    EvidenceReviewer,
-    ModelClient,
+    AgentError,
+    CodingClient,
+    ReviewerClient,
+    build_coding_prompt,
+    build_reviewer_prompt,
 )
 from implicit_decision_gate.gate import (
-    MAX_CODING_ATTEMPTS,
     AgentBackend,
     AttemptRecord,
-    DecisionLedgerRecord,
+    DecisionRecord,
     GateError,
     RolloutOption,
     RunRecord,
@@ -23,15 +23,16 @@ from implicit_decision_gate.gate import (
     RunStore,
     answer_owner,
     render_show,
-    sha256_text,
-    state_after_first_attempt,
+    state_after_review,
     utc_now,
+    validate_reviewer_result,
 )
 from implicit_decision_gate.probe import MigrationProbe
 from implicit_decision_gate.worktree import WorktreeManager
 
 REFERENCE_BRIEF = Path("examples/share-link-expiration/brief.md")
 REFERENCE_SCHEMA = Path("examples/share-link-expiration/schema.sql")
+REFERENCE_MIGRATIONS = Path("examples/share-link-expiration/migrations")
 
 
 class Orchestrator:
@@ -42,8 +43,8 @@ class Orchestrator:
         *,
         repo_path: Path,
         agent_backend: AgentBackend | None = None,
-        coding_client: ModelClient | None = None,
-        reviewer_client: ModelClient | None = None,
+        coding_client: CodingClient | None = None,
+        reviewer_client: ReviewerClient | None = None,
         probe: MigrationProbe | None = None,
         worktree_root: Path | None = None,
     ) -> None:
@@ -56,30 +57,15 @@ class Orchestrator:
         root = worktree_root or (self.repo_path.parent / f".{self.repo_path.name}-idg-worktrees")
         self.worktrees = WorktreeManager(self.repo_path, root)
 
-    def start(self, brief_path: Path) -> RunRecord:
-        """Start and execute attempt one through a terminal or paused state."""
+    def start(self) -> RunRecord:
+        """Start the fixed reference scenario and run its first attempt."""
 
-        self._require_execution_dependencies()
-        resolved_brief = (
-            brief_path.resolve()
-            if brief_path.is_absolute()
-            else (self.repo_path / brief_path).resolve()
-        )
-        expected_brief = (self.repo_path / REFERENCE_BRIEF).resolve()
-        if resolved_brief != expected_brief:
-            raise GateError(f"Only the reference brief shape is supported: {REFERENCE_BRIEF}")
-        try:
-            brief = resolved_brief.read_text(encoding="utf-8")
-        except FileNotFoundError as error:
-            raise GateError(f"Brief does not exist: {resolved_brief}") from error
         base_commit = self.worktrees.current_commit()
+        brief = self.worktrees.read_file_at_commit(base_commit, REFERENCE_BRIEF)
         run = RunRecord(
             run_id=uuid.uuid4().hex,
             state=RunState.STARTED,
-            repo_path=str(self.repo_path),
-            brief_path=str(REFERENCE_BRIEF),
             original_brief=brief,
-            brief_digest=sha256_text(brief),
             base_commit=base_commit,
             agent_backend=self._agent_backend(),
         )
@@ -102,7 +88,6 @@ class Orchestrator:
             run = self.store.load(run_id)
             if run.state is not RunState.READY_TO_RESUME:
                 raise GateError(f"resume requires READY_TO_RESUME, found {run.state}")
-            self._require_execution_dependencies()
             if self._agent_backend() is not run.agent_backend:
                 raise GateError(
                     f"Agent backend must remain {run.agent_backend.value!r} when resuming this run"
@@ -126,51 +111,21 @@ class Orchestrator:
         return run
 
     def _execute_attempt(self, run: RunRecord, *, attempt_number: int) -> None:
-        if attempt_number == 1 and run.state is not RunState.STARTED:
-            raise GateError(f"Attempt one requires STARTED, found {run.state}")
-        if attempt_number == 2 and run.state is not RunState.READY_TO_RESUME:
-            raise GateError(f"Attempt two requires READY_TO_RESUME, found {run.state}")
-        if run.coding_attempt_count >= MAX_CODING_ATTEMPTS:
-            raise GateError(f"Coding-attempt limit of {MAX_CODING_ATTEMPTS} reached")
-        if attempt_number != run.coding_attempt_count + 1:
+        expected_state = RunState.STARTED if attempt_number == 1 else RunState.READY_TO_RESUME
+        if run.state is not expected_state:
+            raise GateError(
+                f"Attempt {attempt_number} requires {expected_state}, found {run.state}"
+            )
+        if attempt_number != len(run.attempts) + 1:
             raise GateError("Coding attempts must be sequential")
 
         worktree = self.worktrees.create(run.run_id, attempt_number, run.base_commit)
-        if any(attempt.worktree_path == str(worktree.path) for attempt in run.attempts):
-            raise GateError("Each coding attempt must use a distinct worktree")
         attempt = AttemptRecord(
             number=attempt_number,
             worktree_path=str(worktree.path),
-            base_commit=worktree.base_commit,
             clean_start_verified=worktree.clean_start_verified,
-            agent_backend=run.agent_backend,
         )
         run.attempts.append(attempt)
-        run.coding_attempt_count += 1
-        self.store.save(run)
-
-        def persist() -> None:
-            self.store.save(run)
-
-        coding_agent = CodingAgent(self._coding_client())
-        proposal = coding_agent.propose(
-            brief=run.original_brief,
-            attempt=attempt,
-            worktree_path=worktree.path,
-            run_id=run.run_id,
-            owner_option=run.owner_option if attempt_number == 2 else None,
-            persist=persist,
-        )
-        digest = self.store.persist_migration(
-            run.run_id,
-            attempt_number,
-            proposal.migration,
-        )
-        immutable_path = self.store.run_path(run.run_id) / f"attempt-{attempt_number}.sql"
-        attempt.migration_path = str(immutable_path)
-        attempt.migration_contents = immutable_path.read_text(encoding="utf-8")
-        attempt.migration_digest = digest
-        attempt.proposal_submitted_at = utc_now()
         self.store.save(run)
 
         schema_path = worktree.path / REFERENCE_SCHEMA
@@ -178,21 +133,42 @@ class Orchestrator:
             baseline_schema = schema_path.read_text(encoding="utf-8")
         except FileNotFoundError as error:
             raise GateError(f"Baseline schema does not exist: {schema_path}") from error
-        attempt.probe_result = self._probe().probe(proposal.migration, baseline_schema)
+
+        selected = run.decision.selected if run.decision is not None else None
+        coding_prompt = build_coding_prompt(
+            brief=run.original_brief,
+            schema=baseline_schema,
+            attempt_number=attempt_number,
+            owner_option=selected if attempt_number == 2 else None,
+        )
+        attempt.coding_prompt = coding_prompt
+        self.store.save(run)
+        migration = self._coding_client().propose_migration(coding_prompt)
+        if not migration.strip():
+            raise AgentError("The coding model returned an empty migration")
+        self._write_worktree_migration(
+            worktree.path,
+            run.run_id,
+            attempt_number,
+            migration,
+        )
+        attempt.migration_digest = self.store.persist_migration(
+            run.run_id,
+            attempt_number,
+            migration,
+        )
+        self.store.save(run)
+        attempt.probe_result = self._probe().probe(migration, baseline_schema)
         attempt.completed_at = utc_now()
         self.store.save(run)
 
         if attempt_number == 1:
-            self._finish_first_attempt(run, persist)
+            self._finish_first_attempt(run)
         else:
             self._finish_second_attempt(run)
         self.store.save(run)
 
-    def _finish_first_attempt(
-        self,
-        run: RunRecord,
-        persist: Callable[[], None],
-    ) -> None:
+    def _finish_first_attempt(self, run: RunRecord) -> None:
         probe_result = run.attempts[0].probe_result
         if probe_result is None:
             raise GateError("Attempt one has no probe result")
@@ -201,70 +177,70 @@ class Orchestrator:
             run.error = "Attempt one produced an UNMODELED rollout behavior"
             return
 
-        reviewer = EvidenceReviewer(self._reviewer_client())
-        reviewer_result = reviewer.review(
+        reviewer_prompt = build_reviewer_prompt(
             brief=run.original_brief,
             option=probe_result.rollout_option,
-            run=run,
-            persist=persist,
         )
-        run.reviewer_result = reviewer_result
-        run.validated_evidence_quote = reviewer_result.evidence_quote
-        run.reviewed_at = utc_now()
-        run.state = state_after_first_attempt(
-            probe_result.rollout_option,
-            reviewer_result.classification,
+        run.reviewer_prompt = reviewer_prompt
+        self.store.save(run)
+        run.reviewer_result = validate_reviewer_result(
+            run.original_brief,
+            self._reviewer_client().review_evidence(reviewer_prompt),
         )
-        run.decision_ledger = DecisionLedgerRecord(
-            observed=probe_result.rollout_option,
-            classification=reviewer_result.classification,
-            evidence_quote=reviewer_result.evidence_quote,
-            state=run.state,
-        )
+        run.state = state_after_review(run.reviewer_result.classification)
+        run.decision = DecisionRecord(observed=probe_result.rollout_option)
         if run.state is RunState.FAILED:
-            run.error = f"Observed rollout was {reviewer_result.classification.value} by the brief"
+            run.error = (
+                f"Observed rollout was {run.reviewer_result.classification.value} by the brief"
+            )
 
     def _finish_second_attempt(self, run: RunRecord) -> None:
-        if run.owner_option is None:
-            raise GateError("Attempt two has no owner option")
+        if run.decision is None or run.decision.selected is None:
+            raise GateError("Attempt two has no owner decision")
         probe_result = run.attempts[1].probe_result
         if probe_result is None:
             raise GateError("Attempt two has no probe result")
-        if probe_result.rollout_option == run.owner_option:
+        if probe_result.rollout_option == run.decision.selected:
             run.state = RunState.COMPLETED
             run.error = None
         else:
             run.state = RunState.FAILED
             run.error = (
                 f"Attempt two produced {probe_result.rollout_option.value}; "
-                f"owner selected {run.owner_option.value}"
+                f"owner selected {run.decision.selected.value}"
             )
-        if run.decision_ledger is not None:
-            run.decision_ledger.state = run.state
 
-    def _require_execution_dependencies(self) -> None:
-        if self.agent_backend is None:
-            raise GateError("An agent backend is required for model execution")
-        if self.coding_client is None:
-            raise GateError("A coding model client is required for model execution")
-        if self.reviewer_client is None:
-            raise GateError("An evidence-review model client is required for model execution")
-        if self.probe is None:
-            raise GateError("A PostgreSQL probe is required for model execution")
+    @staticmethod
+    def _write_worktree_migration(
+        worktree_path: Path,
+        run_id: str,
+        attempt_number: int,
+        migration: str,
+    ) -> None:
+        directory = worktree_path / REFERENCE_MIGRATIONS
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"idg-{run_id}-attempt-{attempt_number}.sql"
+        try:
+            with destination.open("x", encoding="utf-8") as file_handle:
+                file_handle.write(migration)
+                if not migration.endswith("\n"):
+                    file_handle.write("\n")
+        except FileExistsError as error:
+            raise GateError("A migration was already written for this attempt") from error
 
     def _agent_backend(self) -> AgentBackend:
         if self.agent_backend is None:
             raise GateError("An agent backend is required for model execution")
         return self.agent_backend
 
-    def _coding_client(self) -> ModelClient:
+    def _coding_client(self) -> CodingClient:
         if self.coding_client is None:
             raise GateError("A coding model client is required for model execution")
         return self.coding_client
 
-    def _reviewer_client(self) -> ModelClient:
+    def _reviewer_client(self) -> ReviewerClient:
         if self.reviewer_client is None:
-            raise GateError("An evidence-review model client is required for model execution")
+            raise GateError("An evidence-review model client is required for attempt one")
         return self.reviewer_client
 
     def _probe(self) -> MigrationProbe:

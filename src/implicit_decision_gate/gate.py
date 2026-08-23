@@ -15,12 +15,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-MAX_CODING_ATTEMPTS = 2
-MAX_TOOL_STEPS_PER_ATTEMPT = 4
-MAX_TRANSPORT_RETRIES_PER_CALL = 1
-MAX_OWNER_ANSWERS = 1
-PROMPT_VERSION = "2026-08-22.1"
-
 
 class RunState(StrEnum):
     """Allowed persisted run states."""
@@ -58,13 +52,13 @@ class EvidenceClassification(StrEnum):
 
 ROLLOUT_DESCRIPTIONS: dict[RolloutOption, str] = {
     RolloutOption.PRESERVE_EXISTING: (
-        "Existing share links remain non-expiring with NULL; new share links default "
+        "Existing item-sharing links remain non-expiring with NULL; new links default "
         "to approximately 30 days after creation; expires_at remains nullable."
     ),
     RolloutOption.EXPIRE_EXISTING: (
-        "Existing share links receive an expiration approximately 30 days from migration; "
-        "new share links default to approximately 30 days after creation; expires_at remains "
-        "nullable."
+        "Existing item-sharing links receive an expiration approximately 30 days from "
+        "migration; new links default to approximately 30 days after creation; expires_at "
+        "remains nullable."
     ),
     RolloutOption.UNMODELED: "The migration does not match either supported rollout behavior.",
 }
@@ -85,8 +79,6 @@ def sha256_text(value: str) -> str:
 class ProbeResult(BaseModel):
     """Normalized observable migration behavior."""
 
-    table: str = "public.share_links"
-    column: str = "expires_at"
     data_type: str | None = None
     nullable: bool | None = None
     column_default: str | None = None
@@ -103,21 +95,13 @@ class ReviewerResult(BaseModel):
     evidence_quote: str | None = None
 
 
-class DecisionLedgerRecord(BaseModel):
+class DecisionRecord(BaseModel):
     """The single typed owner decision in a run."""
 
-    decision_id: str = "existing_share_link_rollout"
-    impact: str = "HIGH"
+    decision_id: str = "existing_item_sharing_link_rollout"
     observed: RolloutOption
-    classification: EvidenceClassification
-    evidence_quote: str | None
-    state: RunState
-    options: list[RolloutOption] = Field(
-        default_factory=lambda: [
-            RolloutOption.PRESERVE_EXISTING,
-            RolloutOption.EXPIRE_EXISTING,
-        ]
-    )
+    selected: RolloutOption | None = None
+    answered_at: datetime | None = None
 
 
 class AttemptRecord(BaseModel):
@@ -125,21 +109,11 @@ class AttemptRecord(BaseModel):
 
     number: int
     worktree_path: str
-    base_commit: str
     clean_start_verified: bool
-    agent_backend: AgentBackend
-    prompt_version: str = PROMPT_VERSION
-    model_requests: list[dict[str, Any]] = Field(default_factory=list)
-    model_responses: list[dict[str, Any]] = Field(default_factory=list)
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    tool_step_count: int = 0
-    transport_retry_count: int = 0
-    migration_path: str | None = None
-    migration_contents: str | None = None
+    coding_prompt: str | None = None
     migration_digest: str | None = None
     probe_result: ProbeResult | None = None
     started_at: datetime = Field(default_factory=utc_now)
-    proposal_submitted_at: datetime | None = None
     completed_at: datetime | None = None
 
 
@@ -148,25 +122,13 @@ class RunRecord(BaseModel):
 
     run_id: str
     state: RunState
-    repo_path: str
-    brief_path: str
     original_brief: str
-    brief_digest: str
     base_commit: str
     agent_backend: AgentBackend
-    prompt_version: str = PROMPT_VERSION
     attempts: list[AttemptRecord] = Field(default_factory=list)
-    coding_attempt_count: int = 0
-    reviewer_request: dict[str, Any] | None = None
-    reviewer_response: dict[str, Any] | None = None
-    reviewer_transport_retry_count: int = 0
+    reviewer_prompt: str | None = None
     reviewer_result: ReviewerResult | None = None
-    validated_evidence_quote: str | None = None
-    reviewed_at: datetime | None = None
-    decision_ledger: DecisionLedgerRecord | None = None
-    owner_option: RolloutOption | None = None
-    owner_answer_count: int = 0
-    owner_answered_at: datetime | None = None
+    decision: DecisionRecord | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -277,14 +239,9 @@ def validate_reviewer_result(brief: str, result: ReviewerResult) -> ReviewerResu
     return result
 
 
-def state_after_first_attempt(
-    rollout_option: RolloutOption,
-    classification: EvidenceClassification | None,
-) -> RunState:
-    """Return the required terminal or paused state after attempt one."""
+def state_after_review(classification: EvidenceClassification) -> RunState:
+    """Return the required terminal or paused state after evidence review."""
 
-    if rollout_option is RolloutOption.UNMODELED:
-        return RunState.FAILED
     if classification is EvidenceClassification.SUPPORTED:
         return RunState.COMPLETED
     if classification in (
@@ -294,7 +251,7 @@ def state_after_first_attempt(
         return RunState.AWAITING_OWNER
     if classification is EvidenceClassification.CONTRADICTED:
         return RunState.FAILED
-    raise GateError("A modeled rollout requires an evidence classification")
+    raise AssertionError(f"Unhandled evidence classification: {classification}")
 
 
 def answer_owner(run: RunRecord, option: RolloutOption) -> None:
@@ -304,14 +261,11 @@ def answer_owner(run: RunRecord, option: RolloutOption) -> None:
         raise GateError(f"answer requires AWAITING_OWNER, found {run.state}")
     if option is RolloutOption.UNMODELED:
         raise GateError("UNMODELED is not an owner option")
-    if run.owner_answer_count >= MAX_OWNER_ANSWERS:
-        raise GateError("The owner answer limit has been reached")
-    run.owner_option = option
-    run.owner_answer_count += 1
-    run.owner_answered_at = utc_now()
+    if run.decision is None:
+        raise GateError("The paused run has no decision to answer")
+    run.decision.selected = option
+    run.decision.answered_at = utc_now()
     run.state = RunState.READY_TO_RESUME
-    if run.decision_ledger is not None:
-        run.decision_ledger.state = RunState.READY_TO_RESUME
 
 
 def show_payload(run: RunRecord) -> dict[str, Any]:
@@ -325,7 +279,9 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
     classification = run.reviewer_result.classification if run.reviewer_result else None
     pending_question = None
     if run.state is RunState.AWAITING_OWNER:
-        pending_question = "How should existing share links be handled?"
+        pending_question = (
+            "Should existing item-sharing links remain active or receive a 30-day expiration?"
+        )
     final_worktree_path = None
     if run.state in (RunState.COMPLETED, RunState.FAILED) and run.attempts:
         final_worktree_path = run.attempts[-1].worktree_path
@@ -336,7 +292,7 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
         "observed_option": observed,
         "classification": classification,
         "pending_question": pending_question,
-        "owner_option": run.owner_option,
+        "owner_option": run.decision.selected if run.decision else None,
         "attempt_digests": [attempt.migration_digest for attempt in run.attempts],
         "final_worktree_path": final_worktree_path,
         "error": run.error,

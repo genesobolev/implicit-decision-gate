@@ -32,7 +32,7 @@ def test_live_model_can_pause_and_complete_second_attempt(
         reviewer_client=CodexCLIModelClient(),
         probe=PostgresProbe(ADMIN_DSN),
         worktree_root=tmp_path / "live-worktrees",
-    ).start(Path("examples/share-link-expiration/brief.md"))
+    ).start()
     assert first.state is RunState.AWAITING_OWNER
     assert first.attempts[0].probe_result is not None
     observed = first.attempts[0].probe_result.rollout_option
