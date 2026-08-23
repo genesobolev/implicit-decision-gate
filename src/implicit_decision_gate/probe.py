@@ -18,6 +18,7 @@ from implicit_decision_gate.gate import ProbeResult, RolloutOption
 EXPECTED_TABLE = "public.share_links"
 EXPECTED_COLUMN = "expires_at"
 EXPECTED_DATA_TYPE = "timestamp with time zone"
+COMPOSE_ADMIN_DSN = "postgresql://idg_admin:idg_admin@127.0.0.1:55432/postgres"
 APPROXIMATION_TOLERANCE = timedelta(seconds=10)
 TRANSACTION_CONTROL = re.compile(
     r"\b(?:BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION)\b",
