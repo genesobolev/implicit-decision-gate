@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from implicit_decision_gate.gate import ProbeResult, RolloutOption
+from implicit_decision_gate.agent import AgentError
+from implicit_decision_gate.gate import ProbeResult, ReviewerResult, RolloutOption
 
-BRIEF = (
-    "Add expiration support to share links.\n"
-    "Store it in public.share_links.expires_at as a nullable timestamp with time zone.\n"
-    "New share links should expire 30 days after creation.\n"
-)
+BRIEF = """Add 30-day expiration support to the fictional service behind 1Password item-sharing
+links.
+
+Store expiration in `public.share_links.expires_at` as a nullable timestamp with time
+zone. New item-sharing links must expire 30 days after creation.
+"""
 SCHEMA = """CREATE TABLE public.share_links (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     token text NOT NULL UNIQUE,
@@ -22,6 +25,40 @@ SCHEMA = """CREATE TABLE public.share_links (
 );
 INSERT INTO public.share_links (token) VALUES ('existing-fixture');
 """
+
+
+class ScriptedCodingClient:
+    """Return deterministic migrations while recording coding context."""
+
+    def __init__(self, responses: Sequence[str | Exception]) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    def propose_migration(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        if not self.responses:
+            raise AgentError("The scripted coding response queue is empty")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class ScriptedReviewerClient:
+    """Return deterministic reviews while recording reviewer context."""
+
+    def __init__(self, responses: Sequence[ReviewerResult | Exception]) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    def review_evidence(self, prompt: str) -> ReviewerResult:
+        self.prompts.append(prompt)
+        if not self.responses:
+            raise AgentError("The scripted reviewer response queue is empty")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def run_git(repo: Path, *arguments: str) -> str:

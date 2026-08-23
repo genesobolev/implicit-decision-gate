@@ -16,11 +16,10 @@ class Worktree:
     """A verified detached worktree."""
 
     path: Path
-    base_commit: str
     clean_start_verified: bool
 
 
-def _git(repo_path: Path, *arguments: str) -> str:
+def _git(repo_path: Path, *arguments: str, strip: bool = True) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repo_path), *arguments],
         check=False,
@@ -30,7 +29,7 @@ def _git(repo_path: Path, *arguments: str) -> str:
     if completed.returncode:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise WorktreeError(f"git {' '.join(arguments)} failed: {detail}")
-    return completed.stdout.strip()
+    return completed.stdout.strip() if strip else completed.stdout
 
 
 class WorktreeManager:
@@ -48,6 +47,18 @@ class WorktreeManager:
         """Resolve the repository's current commit."""
 
         return _git(self.repo_path, "rev-parse", "HEAD^{commit}")
+
+    def read_file_at_commit(self, commit: str, relative_path: Path) -> str:
+        """Read one repository file from an exact commit without using checkout state."""
+
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise WorktreeError("Committed file path must stay inside the repository")
+        return _git(
+            self.repo_path,
+            "show",
+            f"{commit}:{relative_path.as_posix()}",
+            strip=False,
+        )
 
     def create(self, run_id: str, attempt_number: int, base_commit: str) -> Worktree:
         """Create a new detached checkout of the exact base commit."""
@@ -74,4 +85,4 @@ class WorktreeManager:
         clean = status == ""
         if not clean:
             raise WorktreeError(f"New worktree was not clean: {status}")
-        return Worktree(path=path, base_commit=actual_commit, clean_start_verified=True)
+        return Worktree(path=path, clean_start_verified=True)

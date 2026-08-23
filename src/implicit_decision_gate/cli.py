@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from implicit_decision_gate.agent import DemoScriptedModelClient, ModelClient
+from implicit_decision_gate.agent import DemoScriptedModelClient
 from implicit_decision_gate.codex_client import CodexCLIModelClient
 from implicit_decision_gate.gate import (
     AgentBackend,
@@ -30,8 +30,6 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="Start a new gate run")
-    start.add_argument("--repo", type=Path, required=True)
-    start.add_argument("--brief", type=Path, required=True)
     start.add_argument(
         "--agent",
         choices=[backend.value for backend in AgentBackend],
@@ -62,19 +60,16 @@ def _execution_orchestrator(repo_path: Path, agent_backend: AgentBackend) -> Orc
     worktree_value = os.environ.get("IDG_WORKTREE_DIR")
     worktree_root = Path(worktree_value).resolve() if worktree_value else None
     admin_dsn = os.environ.get("IDG_POSTGRES_ADMIN_DSN", DEFAULT_ADMIN_DSN)
-    coding_client: ModelClient
-    reviewer_client: ModelClient
+    client: DemoScriptedModelClient | CodexCLIModelClient
     if agent_backend is AgentBackend.SCRIPTED:
-        coding_client = DemoScriptedModelClient()
-        reviewer_client = DemoScriptedModelClient()
+        client = DemoScriptedModelClient()
     else:
-        coding_client = CodexCLIModelClient()
-        reviewer_client = CodexCLIModelClient()
+        client = CodexCLIModelClient()
     return Orchestrator(
         repo_path=repo_path,
         agent_backend=agent_backend,
-        coding_client=coding_client,
-        reviewer_client=reviewer_client,
+        coding_client=client,
+        reviewer_client=client,
         probe=PostgresProbe(admin_dsn),
         worktree_root=worktree_root,
     )
@@ -85,14 +80,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     arguments = _parser().parse_args(argv)
     try:
+        repo_path = Path.cwd()
         if arguments.command == "start":
             agent_backend = AgentBackend(arguments.agent)
-            orchestrator = _execution_orchestrator(arguments.repo, agent_backend)
-            run = orchestrator.start(arguments.brief)
+            orchestrator = _execution_orchestrator(repo_path, agent_backend)
+            run = orchestrator.start()
             print(render_show(run))
             return 1 if run.state is RunState.FAILED else 0
 
-        repo_path = Path.cwd()
         if arguments.command == "show":
             print(Orchestrator(repo_path=repo_path).show(arguments.run_id))
             return 0

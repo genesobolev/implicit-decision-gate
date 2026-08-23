@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "implicit-decision-gate"
 version = "0.1.0"
-description = "A PostgreSQL migration gate for implicit rollout decisions"
+description = "A durable gate for missing decisions in long-running agent work"
 requires-python = ">=3.12"
 dependencies = [
     "psycopg[binary]>=3.2,<4",

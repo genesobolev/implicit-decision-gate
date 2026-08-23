@@ -10,24 +10,12 @@ from typing import Any
 
 import pytest
 
-from implicit_decision_gate.agent import AgentError, ModelTransportError
+from implicit_decision_gate.agent import AgentError
 from implicit_decision_gate.codex_client import CodexCLIModelClient
+from implicit_decision_gate.gate import EvidenceClassification
 
 
-def coding_request() -> dict[str, Any]:
-    """Build the normalized coding request used by adapter tests."""
-
-    return {
-        "input": [{"role": "user", "content": "Create a migration."}],
-        "tools": [
-            {"name": "read_file"},
-            {"name": "submit_migration"},
-        ],
-    }
-
-
-def test_codex_tool_output_is_normalized(
-    tmp_path: Path,
+def test_codex_returns_one_structured_sql_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -35,52 +23,49 @@ def test_codex_tool_output_is_normalized(
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["command"] = command
         captured["prompt"] = kwargs["input"]
+        captured["cwd"] = kwargs["cwd"]
         schema_path = Path(command[command.index("--output-schema") + 1])
         captured["schema"] = json.loads(schema_path.read_text(encoding="utf-8"))
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout=json.dumps(
-                {
-                    "tool_name": "submit_migration",
-                    "path": "",
-                    "sql": "SELECT 1;",
-                }
-            ),
+            stdout=json.dumps({"sql": "SELECT 1;"}),
             stderr="",
         )
 
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/codex")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    response = CodexCLIModelClient().complete(
-        coding_request(),
-        working_directory=tmp_path,
-    )
+    result = CodexCLIModelClient().propose_migration("Create a migration.")
 
     command = captured["command"]
     assert command[:2] == ["/usr/local/bin/codex", "exec"]
     assert "--ephemeral" in command
+    assert "--ignore-user-config" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
-    assert command[command.index("-C") + 1] == str(tmp_path)
+    assert "--skip-git-repo-check" in command
+    assert "-C" not in command
+    assert Path(captured["cwd"]).name.startswith("idg-codex-")
     assert command[-1] == "-"
     assert "--model" not in command
-    assert "Create a migration." in captured["prompt"]
-    assert captured["schema"]["properties"]["tool_name"]["enum"] == [
-        "read_file",
-        "submit_migration",
-    ]
-    assert response.tool_calls[0].name == "submit_migration"
-    assert json.loads(response.tool_calls[0].arguments) == {"sql": "SELECT 1;"}
+    assert captured["prompt"] == "Create a migration."
+    assert captured["schema"] == {
+        "type": "object",
+        "properties": {"sql": {"type": "string"}},
+        "required": ["sql"],
+        "additionalProperties": False,
+    }
+    assert result == "SELECT 1;"
 
 
-def test_codex_reviewer_output_uses_fresh_non_repo_process(
+def test_codex_reviewer_uses_fresh_non_repo_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured_command: list[str] = []
+    captured: dict[str, Any] = {}
 
-    def fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        captured_command.extend(command)
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        captured["prompt"] = kwargs["input"]
         return subprocess.CompletedProcess(
             command,
             0,
@@ -96,15 +81,13 @@ def test_codex_reviewer_output_uses_fresh_non_repo_process(
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/codex")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    response = CodexCLIModelClient().complete(
-        {"input": [{"role": "user", "content": "Review evidence."}]}
-    )
+    result = CodexCLIModelClient().review_evidence("Review evidence.")
 
-    assert "--skip-git-repo-check" in captured_command
-    assert json.loads(response.output_text) == {
-        "classification": "NOT_EVIDENCED",
-        "evidence_quote": None,
-    }
+    assert "--skip-git-repo-check" in captured["command"]
+    assert "-C" not in captured["command"]
+    assert captured["prompt"] == "Review evidence."
+    assert result.classification is EvidenceClassification.NOT_EVIDENCED
+    assert result.evidence_quote is None
 
 
 def test_codex_missing_binary_has_scripted_fallback_message(
@@ -113,18 +96,18 @@ def test_codex_missing_binary_has_scripted_fallback_message(
     monkeypatch.setattr(shutil, "which", lambda _name: None)
 
     with pytest.raises(AgentError, match="--agent scripted"):
-        CodexCLIModelClient().complete(coding_request())
+        CodexCLIModelClient().propose_migration("prompt")
 
 
-def test_codex_timeout_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_codex_timeout_is_clear(monkeypatch: pytest.MonkeyPatch) -> None:
     def timeout(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired("codex", 1)
 
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/codex")
     monkeypatch.setattr(subprocess, "run", timeout)
 
-    with pytest.raises(ModelTransportError, match="timed out"):
-        CodexCLIModelClient(timeout_seconds=1).complete(coding_request())
+    with pytest.raises(AgentError, match="timed out"):
+        CodexCLIModelClient(timeout_seconds=1).propose_migration("prompt")
 
 
 @pytest.mark.parametrize(
@@ -148,6 +131,15 @@ def test_codex_timeout_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
             ),
             "invalid structured output",
         ),
+        (
+            subprocess.CompletedProcess(
+                ["codex"],
+                0,
+                stdout=json.dumps({"sql": ""}),
+                stderr="",
+            ),
+            "empty migration",
+        ),
     ],
 )
 def test_codex_failures_are_clear(
@@ -159,4 +151,4 @@ def test_codex_failures_are_clear(
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: completed)
 
     with pytest.raises(AgentError, match=message):
-        CodexCLIModelClient().complete(coding_request())
+        CodexCLIModelClient().propose_migration("prompt")
