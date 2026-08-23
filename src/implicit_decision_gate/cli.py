@@ -8,14 +8,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from implicit_decision_gate.agent import ScriptedModelClient
 from implicit_decision_gate.codex_client import CodexCLIModelClient
 from implicit_decision_gate.gate import (
-    AgentBackend,
     GateError,
     RolloutOption,
     RunState,
-    RunStore,
     render_show,
 )
 from implicit_decision_gate.orchestrator import Orchestrator
@@ -29,13 +26,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="idg")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    start = subparsers.add_parser("start", help="Start a new gate run")
-    start.add_argument(
-        "--agent",
-        choices=[backend.value for backend in AgentBackend],
-        default=AgentBackend.SCRIPTED.value,
-        help="Model backend (default: scripted)",
-    )
+    subparsers.add_parser("start", help="Start a new gate run")
 
     show = subparsers.add_parser("show", help="Show a persisted run")
     show.add_argument("run_id")
@@ -56,18 +47,13 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _execution_orchestrator(repo_path: Path, agent_backend: AgentBackend) -> Orchestrator:
+def _execution_orchestrator(repo_path: Path) -> Orchestrator:
     worktree_value = os.environ.get("IDG_WORKTREE_DIR")
     worktree_root = Path(worktree_value).resolve() if worktree_value else None
     admin_dsn = os.environ.get("IDG_POSTGRES_ADMIN_DSN", DEFAULT_ADMIN_DSN)
-    client: ScriptedModelClient | CodexCLIModelClient
-    if agent_backend is AgentBackend.SCRIPTED:
-        client = ScriptedModelClient()
-    else:
-        client = CodexCLIModelClient()
+    client = CodexCLIModelClient()
     return Orchestrator(
         repo_path=repo_path,
-        agent_backend=agent_backend,
         coding_client=client,
         reviewer_client=client,
         probe=PostgresProbe(admin_dsn),
@@ -82,8 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         repo_path = Path.cwd()
         if arguments.command == "start":
-            agent_backend = AgentBackend(arguments.agent)
-            orchestrator = _execution_orchestrator(repo_path, agent_backend)
+            orchestrator = _execution_orchestrator(repo_path)
             run = orchestrator.start()
             print(render_show(run))
             return 1 if run.state is RunState.FAILED else 0
@@ -97,10 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_show(run))
             return 0
         if arguments.command == "resume":
-            stored_run = RunStore(repo_path).load(arguments.run_id)
-            run = _execution_orchestrator(repo_path, stored_run.agent_backend).resume(
-                arguments.run_id
-            )
+            run = _execution_orchestrator(repo_path).resume(arguments.run_id)
             print(render_show(run))
             return 1 if run.state is RunState.FAILED else 0
         raise GateError(f"Unknown command: {arguments.command}")

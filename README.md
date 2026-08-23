@@ -37,7 +37,7 @@ or the links are publicly accessible.
 ## Where the demo fits in a verified loop
 
 1. The application pins the brief and schema to one Git commit and creates a clean,
-   detached worktree. A coding backend receives those exact inputs in an isolated
+   detached worktree. Codex receives those exact inputs in an isolated
    non-repository process, and the application writes its proposed migration into the
    worktree.
 2. A disposable PostgreSQL 17 database applies the migration and observes its effects on
@@ -73,6 +73,7 @@ Requirements:
 
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
+- An installed and authenticated [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode)
 - PostgreSQL 17, most easily provided by Docker with Compose
 - [`jq`](https://jqlang.github.io/jq/) only for the optional manual inspection commands
 
@@ -80,13 +81,13 @@ From the repository root:
 
 ```bash
 uv sync --extra dev
+codex --version
 docker compose up -d --wait
 uv run idg start
 ```
 
-`start` uses a deterministic scripted backend by default, so the core demonstration does
-not require model credentials. Copy the returned `run_id`; the reference run stops in
-`AWAITING_OWNER` after its first migration expires old links.
+`start` invokes the locally authenticated Codex CLI. Copy the returned `run_id`; the
+reference run stops in `AWAITING_OWNER` after its first migration expires old links.
 
 Record the opposite policy and resume the durable run:
 
@@ -103,16 +104,8 @@ summary at any point:
 uv run idg show RUN_ID
 ```
 
-To use a real, already authenticated Codex CLI instead of the deterministic backend:
-
-```bash
-codex --version
-uv run idg start --agent codex
-```
-
-Use the same `answer`, `resume`, and optional `show` commands. The selected backend is
-stored with the run, so `resume` starts a fresh ephemeral Codex process automatically.
-The application does not ask for or read model API keys.
+`resume` starts a fresh ephemeral Codex process automatically. The application reuses
+the Codex CLI's saved authentication; it does not ask for or read model API keys.
 
 ## Where the prompts come from
 

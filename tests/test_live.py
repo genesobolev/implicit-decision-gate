@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.codex_client import CodexCLIModelClient
-from implicit_decision_gate.gate import AgentBackend, RolloutOption, RunState
+from implicit_decision_gate.gate import RolloutOption, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import PostgresProbe
 from tests.test_probe import ADMIN_DSN, postgres_available
@@ -27,7 +27,6 @@ def test_live_model_can_pause_and_complete_second_attempt(
 ) -> None:
     first = Orchestrator(
         repo_path=reference_repo,
-        agent_backend=AgentBackend.CODEX,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
         probe=PostgresProbe(ADMIN_DSN),
@@ -44,7 +43,6 @@ def test_live_model_can_pause_and_complete_second_attempt(
     Orchestrator(repo_path=reference_repo).answer(first.run_id, selected)
     completed = Orchestrator(
         repo_path=reference_repo,
-        agent_backend=AgentBackend.CODEX,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
         probe=PostgresProbe(ADMIN_DSN),

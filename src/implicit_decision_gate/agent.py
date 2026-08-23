@@ -6,7 +6,6 @@ from typing import Protocol
 
 from implicit_decision_gate.gate import (
     ROLLOUT_DESCRIPTIONS,
-    EvidenceClassification,
     ReviewerResult,
     RolloutOption,
 )
@@ -28,50 +27,6 @@ class ReviewerClient(Protocol):
 
     def review_evidence(self, prompt: str) -> ReviewerResult:
         """Return a normalized evidence classification."""
-
-
-PRESERVE_EXISTING_MIGRATION = """\
--- PRESERVE_EXISTING
-ALTER TABLE public.share_links
-    ADD COLUMN expires_at timestamp with time zone;
-
-ALTER TABLE public.share_links
-    ALTER COLUMN expires_at
-    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
-"""
-
-EXPIRE_EXISTING_MIGRATION = """\
--- EXPIRE_EXISTING
-ALTER TABLE public.share_links
-    ADD COLUMN expires_at timestamp with time zone;
-
-UPDATE public.share_links
-SET expires_at = CURRENT_TIMESTAMP + interval '30 days';
-
-ALTER TABLE public.share_links
-    ALTER COLUMN expires_at
-    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
-"""
-
-
-class ScriptedModelClient:
-    """Deterministic backend for the supported migration workflow."""
-
-    def propose_migration(self, prompt: str) -> str:
-        """Return a stable migration selected from the rendered owner context."""
-
-        if "Owner decision: PRESERVE_EXISTING" in prompt:
-            return PRESERVE_EXISTING_MIGRATION
-        return EXPIRE_EXISTING_MIGRATION
-
-    def review_evidence(self, prompt: str) -> ReviewerResult:
-        """Report that the deliberately incomplete reference brief lacks evidence."""
-
-        del prompt
-        return ReviewerResult(
-            classification=EvidenceClassification.NOT_EVIDENCED,
-            evidence_quote=None,
-        )
 
 
 def build_coding_prompt(

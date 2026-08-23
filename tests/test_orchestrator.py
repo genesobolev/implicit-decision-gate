@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.gate import (
-    AgentBackend,
     EvidenceClassification,
     GateError,
     ReviewerResult,
@@ -31,16 +30,14 @@ RESUME_SCRIPT = """
 import sys
 from pathlib import Path
 
-from implicit_decision_gate.gate import AgentBackend, GateError, RunState
+from implicit_decision_gate.gate import GateError, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
-from tests.conftest import ScriptedCodingClient, ScriptedReviewerClient, ScriptMarkerProbe
+from tests.conftest import ScriptedCodingClient, ScriptMarkerProbe
 
 try:
     run = Orchestrator(
         repo_path=Path(sys.argv[1]),
-        agent_backend=AgentBackend.SCRIPTED,
         coding_client=ScriptedCodingClient(["-- PRESERVE_EXISTING"]),
-        reviewer_client=ScriptedReviewerClient([]),
         probe=ScriptMarkerProbe(),
         worktree_root=Path(sys.argv[3]),
     ).resume(sys.argv[2])
@@ -71,7 +68,6 @@ def orchestrator(
 
     return Orchestrator(
         repo_path=repo,
-        agent_backend=AgentBackend.SCRIPTED,
         coding_client=coding_client,
         reviewer_client=reviewer_client,
         probe=probe,

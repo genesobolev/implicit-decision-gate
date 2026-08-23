@@ -26,13 +26,6 @@ class RunState(StrEnum):
     FAILED = "FAILED"
 
 
-class AgentBackend(StrEnum):
-    """Supported model-execution backends."""
-
-    SCRIPTED = "scripted"
-    CODEX = "codex"
-
-
 class RolloutOption(StrEnum):
     """Modeled existing-row rollout behaviors."""
 
@@ -124,7 +117,6 @@ class RunRecord(BaseModel):
     state: RunState
     original_brief: str
     base_commit: str
-    agent_backend: AgentBackend
     attempts: list[AttemptRecord] = Field(default_factory=list)
     reviewer_prompt: str | None = None
     reviewer_result: ReviewerResult | None = None
@@ -288,7 +280,6 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
     return {
         "run_id": run.run_id,
         "state": run.state,
-        "agent_backend": run.agent_backend,
         "observed_option": observed,
         "classification": classification,
         "pending_question": pending_question,
