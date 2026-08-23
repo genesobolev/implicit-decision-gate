@@ -87,16 +87,22 @@ uv run idg start
 ```
 
 `start` invokes the locally authenticated Codex CLI. Copy the returned `run_id`; the
-reference run stops in `AWAITING_OWNER` after its first migration expires old links. Its
-`decision_request` shows why the run paused, the behavior PostgreSQL observed, both
-supported policies and their consequences, and a complete `idg answer` command for each
-choice. The application defines these verifiable choices; Codex does not select the
-missing policy.
+reference run stops in `AWAITING_OWNER` after its first migration chooses one of the two
+policies the brief left open. Its `decision_request` shows why the run paused, the
+behavior PostgreSQL observed, both supported policies and their resulting database
+behavior, and a complete `idg answer` command for each choice. The application defines
+these verifiable choices; Codex does not select the missing policy.
 
-Record the opposite policy and resume the durable run:
+To make the correction visible, select the policy opposite
+`decision_request.observed.option`, then resume the durable run:
 
 ```bash
+# If Codex chose EXPIRE_EXISTING:
 uv run idg answer RUN_ID --option PRESERVE_EXISTING
+
+# If Codex chose PRESERVE_EXISTING:
+uv run idg answer RUN_ID --option EXPIRE_EXISTING
+
 uv run idg resume RUN_ID
 ```
 
