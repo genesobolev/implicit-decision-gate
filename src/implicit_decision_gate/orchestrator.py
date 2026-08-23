@@ -58,7 +58,7 @@ class Orchestrator:
         self.worktrees = WorktreeManager(self.repo_path, root)
 
     def start(self) -> RunRecord:
-        """Start the fixed reference scenario and run its first attempt."""
+        """Start the item-sharing expiration run and its first attempt."""
 
         base_commit = self.worktrees.current_commit()
         brief = self.worktrees.read_file_at_commit(base_commit, REFERENCE_BRIEF)

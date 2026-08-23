@@ -54,8 +54,8 @@ ALTER TABLE public.share_links
 """
 
 
-class DemoScriptedModelClient:
-    """Deterministic public demo backend for the reference scenario."""
+class ScriptedModelClient:
+    """Deterministic backend for the supported migration workflow."""
 
     def propose_migration(self, prompt: str) -> str:
         """Return a stable migration selected from the rendered owner context."""

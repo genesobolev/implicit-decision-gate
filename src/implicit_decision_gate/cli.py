@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from implicit_decision_gate.agent import DemoScriptedModelClient
+from implicit_decision_gate.agent import ScriptedModelClient
 from implicit_decision_gate.codex_client import CodexCLIModelClient
 from implicit_decision_gate.gate import (
     AgentBackend,
@@ -60,9 +60,9 @@ def _execution_orchestrator(repo_path: Path, agent_backend: AgentBackend) -> Orc
     worktree_value = os.environ.get("IDG_WORKTREE_DIR")
     worktree_root = Path(worktree_value).resolve() if worktree_value else None
     admin_dsn = os.environ.get("IDG_POSTGRES_ADMIN_DSN", DEFAULT_ADMIN_DSN)
-    client: DemoScriptedModelClient | CodexCLIModelClient
+    client: ScriptedModelClient | CodexCLIModelClient
     if agent_backend is AgentBackend.SCRIPTED:
-        client = DemoScriptedModelClient()
+        client = ScriptedModelClient()
     else:
         client = CodexCLIModelClient()
     return Orchestrator(
