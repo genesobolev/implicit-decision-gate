@@ -49,22 +49,39 @@ def test_cli_pauses_inspects_answers_and_resumes(
     started = json.loads(capsys.readouterr().out)
     assert started["state"] == "AWAITING_OWNER"
     assert "agent_backend" not in started
+    assert started["decision_request"] is not None
 
     run_id = started["run_id"]
     assert main(["show", run_id]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["state"] == "AWAITING_OWNER"
-    assert shown["pending_question"]
+    assert shown["decision_request"] == started["decision_request"]
+    assert "pending_question" not in shown
+    decision_request = shown["decision_request"]
+    assert decision_request["id"] == "existing_item_sharing_link_rollout"
+    assert decision_request["question"] == "What should happen to existing item-sharing links?"
+    assert decision_request["observed"]["option"] == "EXPIRE_EXISTING"
+    assert [option["option"] for option in decision_request["options"]] == [
+        "PRESERVE_EXISTING",
+        "EXPIRE_EXISTING",
+    ]
+    assert [option["command"] for option in decision_request["options"]] == [
+        f"uv run idg answer {run_id} --option PRESERVE_EXISTING",
+        f"uv run idg answer {run_id} --option EXPIRE_EXISTING",
+    ]
+    assert all(option["behavior"] for option in decision_request["options"])
 
     assert main(["answer", run_id, "--option", "PRESERVE_EXISTING"]) == 0
     answered = json.loads(capsys.readouterr().out)
     assert answered["state"] == "READY_TO_RESUME"
     assert answered["owner_option"] == "PRESERVE_EXISTING"
+    assert answered["decision_request"] is None
 
     assert main(["resume", run_id]) == 0
     completed = json.loads(capsys.readouterr().out)
     assert completed["state"] == "COMPLETED"
     assert completed["owner_option"] == "PRESERVE_EXISTING"
+    assert completed["decision_request"] is None
 
 
 def test_start_rejects_the_removed_backend_selector(

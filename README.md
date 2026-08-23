@@ -87,7 +87,11 @@ uv run idg start
 ```
 
 `start` invokes the locally authenticated Codex CLI. Copy the returned `run_id`; the
-reference run stops in `AWAITING_OWNER` after its first migration expires old links.
+reference run stops in `AWAITING_OWNER` after its first migration expires old links. Its
+`decision_request` shows why the run paused, the behavior PostgreSQL observed, both
+supported policies and their consequences, and a complete `idg answer` command for each
+choice. The application defines these verifiable choices; Codex does not select the
+missing policy.
 
 Record the opposite policy and resume the durable run:
 
@@ -96,9 +100,10 @@ uv run idg answer RUN_ID --option PRESERVE_EXISTING
 uv run idg resume RUN_ID
 ```
 
-`answer` only records the decision. `resume` deliberately remains separate so execution
-can occur later or in another process. `show` is optional and can inspect the current
-summary at any point:
+`answer` only records the selected option. It does not invoke Codex or interpret free
+text. `resume` deliberately remains separate so execution can occur later or in another
+process. `show` is optional and returns the same structured decision request while the
+run is paused:
 
 ```bash
 uv run idg show RUN_ID

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from implicit_decision_gate.gate import (
+    OWNER_ROLLOUT_OPTIONS,
     ROLLOUT_DESCRIPTIONS,
     ReviewerResult,
     RolloutOption,
@@ -42,10 +43,7 @@ def build_coding_prompt(
         raise AgentError(f"Unsupported coding attempt: {attempt_number}")
     if attempt_number == 1 and owner_option is not None:
         raise AgentError("Attempt one must not receive an owner decision")
-    if attempt_number == 2 and owner_option not in (
-        RolloutOption.PRESERVE_EXISTING,
-        RolloutOption.EXPIRE_EXISTING,
-    ):
+    if attempt_number == 2 and owner_option not in OWNER_ROLLOUT_OPTIONS:
         raise AgentError("Attempt two requires a modeled owner option")
 
     sections = [
@@ -69,10 +67,7 @@ to approximately 30 days from creation.""",
 def build_reviewer_prompt(*, brief: str, option: RolloutOption) -> str:
     """Render the complete evidence-only review context."""
 
-    if option not in (
-        RolloutOption.PRESERVE_EXISTING,
-        RolloutOption.EXPIRE_EXISTING,
-    ):
+    if option not in OWNER_ROLLOUT_OPTIONS:
         raise AgentError("Evidence review requires a modeled rollout option")
     return (
         "Classify whether the brief explicitly supports the observed existing-row behavior.\n"

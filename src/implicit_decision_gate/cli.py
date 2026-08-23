@@ -10,6 +10,7 @@ from pathlib import Path
 
 from implicit_decision_gate.codex_client import CodexCLIModelClient
 from implicit_decision_gate.gate import (
+    OWNER_ROLLOUT_OPTIONS,
     GateError,
     RolloutOption,
     RunState,
@@ -35,10 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     answer.add_argument("run_id")
     answer.add_argument(
         "--option",
-        choices=[
-            RolloutOption.PRESERVE_EXISTING.value,
-            RolloutOption.EXPIRE_EXISTING.value,
-        ],
+        choices=[option.value for option in OWNER_ROLLOUT_OPTIONS],
         required=True,
     )
 

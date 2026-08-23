@@ -56,6 +56,11 @@ ROLLOUT_DESCRIPTIONS: dict[RolloutOption, str] = {
     RolloutOption.UNMODELED: "The migration does not match either supported rollout behavior.",
 }
 
+OWNER_ROLLOUT_OPTIONS = (
+    RolloutOption.PRESERVE_EXISTING,
+    RolloutOption.EXPIRE_EXISTING,
+)
+
 
 def utc_now() -> datetime:
     """Return a timezone-aware current timestamp."""
@@ -251,13 +256,44 @@ def answer_owner(run: RunRecord, option: RolloutOption) -> None:
 
     if run.state is not RunState.AWAITING_OWNER:
         raise GateError(f"answer requires AWAITING_OWNER, found {run.state}")
-    if option is RolloutOption.UNMODELED:
-        raise GateError("UNMODELED is not an owner option")
+    if option not in OWNER_ROLLOUT_OPTIONS:
+        raise GateError(f"{option.value} is not an owner option")
     if run.decision is None:
         raise GateError("The paused run has no decision to answer")
     run.decision.selected = option
     run.decision.answered_at = utc_now()
     run.state = RunState.READY_TO_RESUME
+
+
+def decision_request_payload(run: RunRecord) -> dict[str, Any] | None:
+    """Build the actionable owner decision request for a paused run."""
+
+    if run.state is not RunState.AWAITING_OWNER:
+        return None
+    if run.decision is None:
+        raise GateError("The paused run has no decision to present")
+
+    observed = run.decision.observed
+    return {
+        "id": run.decision.decision_id,
+        "question": "What should happen to existing item-sharing links?",
+        "reason": (
+            "The gate could not establish from the brief whether the 30-day expiration "
+            "should apply to existing item-sharing links."
+        ),
+        "observed": {
+            "option": observed,
+            "behavior": ROLLOUT_DESCRIPTIONS[observed],
+        },
+        "options": [
+            {
+                "option": option,
+                "behavior": ROLLOUT_DESCRIPTIONS[option],
+                "command": f"uv run idg answer {run.run_id} --option {option.value}",
+            }
+            for option in OWNER_ROLLOUT_OPTIONS
+        ],
+    }
 
 
 def show_payload(run: RunRecord) -> dict[str, Any]:
@@ -269,11 +305,6 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
         else None
     )
     classification = run.reviewer_result.classification if run.reviewer_result else None
-    pending_question = None
-    if run.state is RunState.AWAITING_OWNER:
-        pending_question = (
-            "Should existing item-sharing links remain active or receive a 30-day expiration?"
-        )
     final_worktree_path = None
     if run.state in (RunState.COMPLETED, RunState.FAILED) and run.attempts:
         final_worktree_path = run.attempts[-1].worktree_path
@@ -282,7 +313,7 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
         "state": run.state,
         "observed_option": observed,
         "classification": classification,
-        "pending_question": pending_question,
+        "decision_request": decision_request_payload(run),
         "owner_option": run.decision.selected if run.decision else None,
         "attempt_digests": [attempt.migration_digest for attempt in run.attempts],
         "final_worktree_path": final_worktree_path,
