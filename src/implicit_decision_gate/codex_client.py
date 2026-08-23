@@ -13,9 +13,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from implicit_decision_gate.agent import AgentError
-from implicit_decision_gate.gate import ReviewerResult
+from implicit_decision_gate.gate import (
+    ModelInvocationRecord,
+    ModelRole,
+    ReviewerResult,
+)
 
 DEFAULT_CODEX_TIMEOUT_SECONDS = 300
+CODEX_MODEL = "gpt-5.6-terra"
+CODEX_REASONING_EFFORT = "xhigh"
 
 CODING_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -44,6 +50,42 @@ class CodexCLIModelClient:
 
     executable: str = "codex"
     timeout_seconds: int = DEFAULT_CODEX_TIMEOUT_SECONDS
+
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Return the pinned model configuration and installed CLI version."""
+
+        executable_path = self._executable_path()
+        try:
+            completed = subprocess.run(
+                [executable_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise AgentError(
+                f"Codex CLI version check timed out after {self.timeout_seconds} seconds"
+            ) from error
+        except OSError as error:
+            raise AgentError(f"Could not start Codex CLI: {error}") from error
+        if completed.returncode != 0:
+            raise AgentError(_codex_failure_message(completed))
+        version = (completed.stdout or completed.stderr).strip()
+        if not version:
+            raise AgentError("Codex CLI returned an empty version")
+        return ModelInvocationRecord(
+            role=role,
+            attempt_number=attempt_number,
+            model=CODEX_MODEL,
+            reasoning_effort=CODEX_REASONING_EFFORT,
+            codex_cli_version=version,
+        )
 
     def propose_migration(self, prompt: str) -> str:
         """Return one structured SQL proposal from an isolated process."""
@@ -84,9 +126,7 @@ class CodexCLIModelClient:
         *,
         schema: dict[str, Any],
     ) -> dict[str, Any]:
-        executable_path = shutil.which(self.executable)
-        if executable_path is None:
-            raise AgentError("Codex CLI was not found; install and sign in to Codex")
+        executable_path = self._executable_path()
 
         with tempfile.TemporaryDirectory(prefix="idg-codex-") as temporary_value:
             temporary_path = Path(temporary_value)
@@ -95,6 +135,11 @@ class CodexCLIModelClient:
             command = [
                 executable_path,
                 "exec",
+                "--model",
+                CODEX_MODEL,
+                "--config",
+                f'model_reasoning_effort="{CODEX_REASONING_EFFORT}"',
+                "--strict-config",
                 "--ephemeral",
                 "--ignore-user-config",
                 "--sandbox",
@@ -130,6 +175,12 @@ class CodexCLIModelClient:
         if not isinstance(payload, dict):
             raise AgentError("Codex CLI structured output must be a JSON object")
         return payload
+
+    def _executable_path(self) -> str:
+        executable_path = shutil.which(self.executable)
+        if executable_path is None:
+            raise AgentError("Codex CLI was not found; install and sign in to Codex")
+        return executable_path
 
 
 def _codex_failure_message(completed: subprocess.CompletedProcess[str]) -> str:

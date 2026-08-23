@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.agent import build_coding_prompt
-from implicit_decision_gate.codex_client import CodexCLIModelClient
+from implicit_decision_gate.codex_client import (
+    CODEX_MODEL,
+    CODEX_REASONING_EFFORT,
+    CodexCLIModelClient,
+)
 from implicit_decision_gate.gate import RolloutOption, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import PostgresProbe
@@ -53,6 +57,10 @@ def test_live_model_can_pause_and_complete_second_attempt(
         worktree_root=tmp_path / "live-worktrees",
     ).start()
     assert first.state is RunState.AWAITING_OWNER
+    assert all(record.model == CODEX_MODEL for record in first.model_invocations)
+    assert all(
+        record.reasoning_effort == CODEX_REASONING_EFFORT for record in first.model_invocations
+    )
     assert first.attempts[0].probe_result is not None
     observed = first.attempts[0].probe_result.rollout_option
     selected = (
@@ -71,3 +79,4 @@ def test_live_model_can_pause_and_complete_second_attempt(
     assert completed.state is RunState.COMPLETED
     assert completed.attempts[1].probe_result is not None
     assert completed.attempts[1].probe_result.rollout_option is selected
+    assert len(completed.model_invocations) == 3

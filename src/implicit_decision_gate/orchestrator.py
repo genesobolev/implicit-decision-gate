@@ -16,6 +16,7 @@ from implicit_decision_gate.gate import (
     AttemptRecord,
     DecisionRecord,
     GateError,
+    ModelRole,
     RolloutOption,
     RunRecord,
     RunState,
@@ -135,7 +136,15 @@ class Orchestrator:
         )
         attempt.coding_prompt = coding_prompt
         self.store.save(run)
-        migration = self._coding_client().propose_migration(coding_prompt)
+        coding_client = self._coding_client()
+        run.model_invocations.append(
+            coding_client.invocation_record(
+                role=ModelRole.CODING_AGENT,
+                attempt_number=attempt_number,
+            )
+        )
+        self.store.save(run)
+        migration = coding_client.propose_migration(coding_prompt)
         if not migration.strip():
             raise AgentError("The coding model returned an empty migration")
         self._write_worktree_migration(
@@ -175,9 +184,17 @@ class Orchestrator:
         )
         run.reviewer_prompt = reviewer_prompt
         self.store.save(run)
+        reviewer_client = self._reviewer_client()
+        run.model_invocations.append(
+            reviewer_client.invocation_record(
+                role=ModelRole.EVIDENCE_REVIEWER,
+                attempt_number=None,
+            )
+        )
+        self.store.save(run)
         run.reviewer_result = validate_reviewer_result(
             run.original_brief,
-            self._reviewer_client().review_evidence(reviewer_prompt),
+            reviewer_client.review_evidence(reviewer_prompt),
         )
         run.state = state_after_review(run.reviewer_result.classification)
         run.decision = DecisionRecord(observed=probe_result.rollout_option)

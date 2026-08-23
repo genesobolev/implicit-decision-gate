@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.agent import AgentError
-from implicit_decision_gate.gate import ProbeResult, ReviewerResult, RolloutOption
+from implicit_decision_gate.gate import (
+    ModelInvocationRecord,
+    ModelRole,
+    ProbeResult,
+    ReviewerResult,
+    RolloutOption,
+)
 
 BRIEF = """Add 30-day expiration support to item-sharing links.
 
@@ -33,6 +39,22 @@ class ScriptedCodingClient:
         self.responses = list(responses)
         self.prompts: list[str] = []
 
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Return deterministic provenance for the scripted invocation."""
+
+        return ModelInvocationRecord(
+            role=role,
+            attempt_number=attempt_number,
+            model="scripted-coding-client",
+            reasoning_effort="deterministic",
+            codex_cli_version="not-applicable",
+        )
+
     def propose_migration(self, prompt: str) -> str:
         self.prompts.append(prompt)
         if not self.responses:
@@ -49,6 +71,22 @@ class ScriptedReviewerClient:
     def __init__(self, responses: Sequence[ReviewerResult | Exception]) -> None:
         self.responses = list(responses)
         self.prompts: list[str] = []
+
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Return deterministic provenance for the scripted invocation."""
+
+        return ModelInvocationRecord(
+            role=role,
+            attempt_number=attempt_number,
+            model="scripted-reviewer-client",
+            reasoning_effort="deterministic",
+            codex_cli_version="not-applicable",
+        )
 
     def review_evidence(self, prompt: str) -> ReviewerResult:
         self.prompts.append(prompt)

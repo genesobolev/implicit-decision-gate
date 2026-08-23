@@ -24,6 +24,19 @@ def test_first_coding_prompt_contains_only_declared_inputs() -> None:
     assert "owner decision" not in prompt.lower()
 
 
+def test_coding_prompt_envelope_does_not_repeat_product_requirements() -> None:
+    prompt = build_coding_prompt(
+        brief="AUTHORITATIVE_PRODUCT_REQUIREMENTS",
+        schema="BASELINE_SCHEMA",
+        attempt_number=1,
+        owner_option=None,
+    )
+    envelope = prompt.split("Original brief:", maxsplit=1)[0]
+
+    assert "expires_at" not in envelope
+    assert "30 days" not in envelope
+
+
 def test_attempt_two_prompt_contains_only_allowed_fresh_context() -> None:
     reviewer_prompt = build_reviewer_prompt(
         brief="ORIGINAL_BRIEF",

@@ -93,6 +93,13 @@ behavior PostgreSQL observed, both supported policies and their resulting databa
 behavior, and a complete `idg answer` command for each choice. The application defines
 these verifiable choices; Codex does not select the missing policy.
 
+The application pins every coding and evidence-review invocation to
+[`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) with
+`xhigh` reasoning. It passes both settings explicitly while ignoring user configuration,
+and records the model, reasoning effort, invocation role, attempt number, and Codex CLI
+version in `run.json`. The model slug is fixed by this repository; it is not a claim that
+the provider's underlying weights are an immutable dated snapshot.
+
 To make the contract amendment visible, select the policy opposite
 `decision_request.observed.option`, then resume the durable run:
 
@@ -130,7 +137,7 @@ evidence.
 Launch it from the repository root:
 
 ```bash
-uv run --with 'jupyterlab>=4,<5' jupyter lab \
+uv run --with 'jupyterlab>=4.1,<5' jupyter lab \
     notebooks/implicit-decision-gate-walkthrough.ipynb
 ```
 
@@ -150,11 +157,19 @@ one fictional baseline schema at
 The project-controlled coding and evidence-review prompts are assembled in
 [`agent.py`](src/implicit_decision_gate/agent.py).
 
-The first coding request contains the brief, the baseline schema, and the migration output
-contract. The second is a new request containing the same inputs plus the selected owner
-option and its required behavior. It does not contain attempt one's SQL, model response,
-or review rationale. The reviewer receives only the brief and the behavior PostgreSQL
-observed.
+The brief is the human-owned engineering ticket. The rendered coding prompt is an
+application-owned execution envelope, not an engineer's reinterpretation of that ticket.
+The first request combines isolation and structured-output instructions with the
+verbatim brief and baseline schema. The second is a new request containing the same
+inputs plus the selected owner option and its required behavior. It does not contain
+attempt one's SQL, model response, or review rationale. The reviewer receives only the
+verbatim brief and the behavior PostgreSQL observed.
+
+The brief is stored separately and embedded in each applicable prompt because every
+Codex process is ephemeral and needs its complete input. Persisting both also lets an
+auditor compare the source contract with the exact materialized prompt. Product
+requirements are not repeated in the prompt envelope; attempt two's additional behavior
+and acceptance criteria are the explicit owner amendment.
 
 Each Codex process runs from a fresh temporary directory instead of the repository. Its
 sandbox is read-only, user configuration is ignored, and the application is the only
@@ -192,6 +207,7 @@ Inspect the complete record and the most useful attempt evidence:
 
 ```bash
 jq . .idg/runs/RUN_ID/run.json
+jq '.model_invocations' .idg/runs/RUN_ID/run.json
 jq '{state, decision, reviewer_result}' .idg/runs/RUN_ID/run.json
 jq -r '.attempts[].coding_prompt' .idg/runs/RUN_ID/run.json
 jq -r '.reviewer_prompt' .idg/runs/RUN_ID/run.json
