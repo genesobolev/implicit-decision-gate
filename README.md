@@ -138,7 +138,8 @@ JupyterLab remains demo tooling rather than a project dependency. Run the launch
 once before presenting so `uv` can cache it. The notebook invokes the live Codex and
 PostgreSQL path, creates a new durable run, and makes the typed owner choice an explicit
 cell to review or edit before resuming. The checked-in outputs are one representative
-live run; a new run may initially choose either supported rollout policy.
+live run in which the owner confirms the observed policy. A new run may initially choose
+either supported rollout policy, and the owner may confirm it or select the other one.
 
 ## Where the prompts come from
 
