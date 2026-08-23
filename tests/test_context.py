@@ -21,7 +21,7 @@ def test_first_coding_prompt_contains_only_declared_inputs() -> None:
 
     assert "ORIGINAL_BRIEF" in prompt
     assert "CREATE TABLE public.share_links" in prompt
-    assert "Owner decision" not in prompt
+    assert "owner decision" not in prompt.lower()
 
 
 def test_attempt_two_prompt_contains_only_allowed_fresh_context() -> None:
@@ -38,7 +38,20 @@ def test_attempt_two_prompt_contains_only_allowed_fresh_context() -> None:
 
     assert "ORIGINAL_BRIEF" in prompt
     assert "BASELINE_SCHEMA" in prompt
-    assert "Owner decision: EXPIRE_EXISTING" in prompt
+    assert "Authoritative owner decision: EXPIRE_EXISTING" in prompt
+    assert "approximately 30 days after migration time" in prompt
     assert reviewer_prompt not in prompt
     assert "first migration" not in prompt.lower()
     assert "reviewer" not in prompt.lower()
+
+
+def test_preserve_decision_explains_postgres_default_semantics() -> None:
+    prompt = build_coding_prompt(
+        brief="ORIGINAL_BRIEF",
+        schema="BASELINE_SCHEMA",
+        attempt_number=2,
+        owner_option=RolloutOption.PRESERVE_EXISTING,
+    )
+
+    assert "seeded pre-existing row must read expires_at IS NULL" in prompt
+    assert "add the nullable column without a default" in prompt

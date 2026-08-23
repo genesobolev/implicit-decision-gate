@@ -5,11 +5,24 @@ from __future__ import annotations
 from typing import Protocol
 
 from implicit_decision_gate.gate import (
+    OWNER_ROLLOUT_OPTIONS,
     ROLLOUT_DESCRIPTIONS,
-    EvidenceClassification,
     ReviewerResult,
     RolloutOption,
 )
+
+OWNER_ACCEPTANCE_CRITERIA: dict[RolloutOption, str] = {
+    RolloutOption.PRESERVE_EXISTING: (
+        "After migration, the seeded pre-existing row must read expires_at IS NULL. "
+        "In PostgreSQL, adding the column with its non-NULL default in one statement "
+        "would make existing rows read that default, so add the nullable column without "
+        "a default before setting the default for future inserts."
+    ),
+    RolloutOption.EXPIRE_EXISTING: (
+        "After migration, the seeded pre-existing row must read an expires_at value "
+        "approximately 30 days after migration time."
+    ),
+}
 
 
 class AgentError(RuntimeError):
@@ -30,50 +43,6 @@ class ReviewerClient(Protocol):
         """Return a normalized evidence classification."""
 
 
-PRESERVE_EXISTING_MIGRATION = """\
--- PRESERVE_EXISTING
-ALTER TABLE public.share_links
-    ADD COLUMN expires_at timestamp with time zone;
-
-ALTER TABLE public.share_links
-    ALTER COLUMN expires_at
-    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
-"""
-
-EXPIRE_EXISTING_MIGRATION = """\
--- EXPIRE_EXISTING
-ALTER TABLE public.share_links
-    ADD COLUMN expires_at timestamp with time zone;
-
-UPDATE public.share_links
-SET expires_at = CURRENT_TIMESTAMP + interval '30 days';
-
-ALTER TABLE public.share_links
-    ALTER COLUMN expires_at
-    SET DEFAULT (CURRENT_TIMESTAMP + interval '30 days');
-"""
-
-
-class DemoScriptedModelClient:
-    """Deterministic public demo backend for the reference scenario."""
-
-    def propose_migration(self, prompt: str) -> str:
-        """Return a stable migration selected from the rendered owner context."""
-
-        if "Owner decision: PRESERVE_EXISTING" in prompt:
-            return PRESERVE_EXISTING_MIGRATION
-        return EXPIRE_EXISTING_MIGRATION
-
-    def review_evidence(self, prompt: str) -> ReviewerResult:
-        """Report that the deliberately incomplete reference brief lacks evidence."""
-
-        del prompt
-        return ReviewerResult(
-            classification=EvidenceClassification.NOT_EVIDENCED,
-            evidence_quote=None,
-        )
-
-
 def build_coding_prompt(
     *,
     brief: str,
@@ -87,10 +56,7 @@ def build_coding_prompt(
         raise AgentError(f"Unsupported coding attempt: {attempt_number}")
     if attempt_number == 1 and owner_option is not None:
         raise AgentError("Attempt one must not receive an owner decision")
-    if attempt_number == 2 and owner_option not in (
-        RolloutOption.PRESERVE_EXISTING,
-        RolloutOption.EXPIRE_EXISTING,
-    ):
+    if attempt_number == 2 and owner_option not in OWNER_ROLLOUT_OPTIONS:
         raise AgentError("Attempt two requires a modeled owner option")
 
     sections = [
@@ -105,8 +71,9 @@ to approximately 30 days from creation.""",
     if attempt_number == 2:
         assert owner_option is not None
         sections.append(
-            f"Owner decision: {owner_option.value}\n"
-            f"Required behavior: {ROLLOUT_DESCRIPTIONS[owner_option]}"
+            f"Authoritative owner decision: {owner_option.value}\n"
+            f"Required behavior: {ROLLOUT_DESCRIPTIONS[owner_option]}\n"
+            f"PostgreSQL acceptance criteria: {OWNER_ACCEPTANCE_CRITERIA[owner_option]}"
         )
     return "\n\n".join(sections)
 
@@ -114,10 +81,7 @@ to approximately 30 days from creation.""",
 def build_reviewer_prompt(*, brief: str, option: RolloutOption) -> str:
     """Render the complete evidence-only review context."""
 
-    if option not in (
-        RolloutOption.PRESERVE_EXISTING,
-        RolloutOption.EXPIRE_EXISTING,
-    ):
+    if option not in OWNER_ROLLOUT_OPTIONS:
         raise AgentError("Evidence review requires a modeled rollout option")
     return (
         "Classify whether the brief explicitly supports the observed existing-row behavior.\n"

@@ -90,12 +90,12 @@ def test_codex_reviewer_uses_fresh_non_repo_process(
     assert result.evidence_quote is None
 
 
-def test_codex_missing_binary_has_scripted_fallback_message(
+def test_codex_missing_binary_is_clear(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda _name: None)
 
-    with pytest.raises(AgentError, match="--agent scripted"):
+    with pytest.raises(AgentError, match="install and sign in"):
         CodexCLIModelClient().propose_migration("prompt")
 
 

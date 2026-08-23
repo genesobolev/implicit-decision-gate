@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: idg_admin
       POSTGRES_USER: idg_admin
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     tmpfs:
       - /var/lib/postgresql/data
     volumes:

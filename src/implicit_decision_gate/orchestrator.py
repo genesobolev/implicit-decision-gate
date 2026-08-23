@@ -13,7 +13,6 @@ from implicit_decision_gate.agent import (
     build_reviewer_prompt,
 )
 from implicit_decision_gate.gate import (
-    AgentBackend,
     AttemptRecord,
     DecisionRecord,
     GateError,
@@ -42,7 +41,6 @@ class Orchestrator:
         self,
         *,
         repo_path: Path,
-        agent_backend: AgentBackend | None = None,
         coding_client: CodingClient | None = None,
         reviewer_client: ReviewerClient | None = None,
         probe: MigrationProbe | None = None,
@@ -50,7 +48,6 @@ class Orchestrator:
     ) -> None:
         self.repo_path = repo_path.resolve()
         self.store = RunStore(self.repo_path)
-        self.agent_backend = agent_backend
         self.coding_client = coding_client
         self.reviewer_client = reviewer_client
         self.probe = probe
@@ -58,7 +55,7 @@ class Orchestrator:
         self.worktrees = WorktreeManager(self.repo_path, root)
 
     def start(self) -> RunRecord:
-        """Start the fixed reference scenario and run its first attempt."""
+        """Start the item-sharing expiration run and its first attempt."""
 
         base_commit = self.worktrees.current_commit()
         brief = self.worktrees.read_file_at_commit(base_commit, REFERENCE_BRIEF)
@@ -67,7 +64,6 @@ class Orchestrator:
             state=RunState.STARTED,
             original_brief=brief,
             base_commit=base_commit,
-            agent_backend=self._agent_backend(),
         )
         self.store.create(run)
         return self._execute_or_fail(run, attempt_number=1)
@@ -88,10 +84,6 @@ class Orchestrator:
             run = self.store.load(run_id)
             if run.state is not RunState.READY_TO_RESUME:
                 raise GateError(f"resume requires READY_TO_RESUME, found {run.state}")
-            if self._agent_backend() is not run.agent_backend:
-                raise GateError(
-                    f"Agent backend must remain {run.agent_backend.value!r} when resuming this run"
-                )
             return self._execute_or_fail(run, attempt_number=2)
 
     def show(self, run_id: str) -> str:
@@ -227,11 +219,6 @@ class Orchestrator:
                     file_handle.write("\n")
         except FileExistsError as error:
             raise GateError("A migration was already written for this attempt") from error
-
-    def _agent_backend(self) -> AgentBackend:
-        if self.agent_backend is None:
-            raise GateError("An agent backend is required for model execution")
-        return self.agent_backend
 
     def _coding_client(self) -> CodingClient:
         if self.coding_client is None:

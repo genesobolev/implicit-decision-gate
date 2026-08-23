@@ -12,8 +12,7 @@ import pytest
 from implicit_decision_gate.agent import AgentError
 from implicit_decision_gate.gate import ProbeResult, ReviewerResult, RolloutOption
 
-BRIEF = """Add 30-day expiration support to the fictional service behind 1Password item-sharing
-links.
+BRIEF = """Add 30-day expiration support to item-sharing links.
 
 Store expiration in `public.share_links.expires_at` as a nullable timestamp with time
 zone. New item-sharing links must expire 30 days after creation.

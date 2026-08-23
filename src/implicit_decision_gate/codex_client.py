@@ -86,10 +86,7 @@ class CodexCLIModelClient:
     ) -> dict[str, Any]:
         executable_path = shutil.which(self.executable)
         if executable_path is None:
-            raise AgentError(
-                "Codex CLI was not found; install and sign in to Codex, "
-                "or start a run with --agent scripted"
-            )
+            raise AgentError("Codex CLI was not found; install and sign in to Codex")
 
         with tempfile.TemporaryDirectory(prefix="idg-codex-") as temporary_value:
             temporary_path = Path(temporary_value)
@@ -139,10 +136,7 @@ def _codex_failure_message(completed: subprocess.CompletedProcess[str]) -> str:
     details = (completed.stderr or completed.stdout).strip()
     normalized = details.lower()
     if any(marker in normalized for marker in ("auth", "login", "logged in", "sign in")):
-        return (
-            "Codex CLI is not authenticated; sign in with the Codex CLI, "
-            "or start a run with --agent scripted"
-        )
+        return "Codex CLI is not authenticated; sign in with the Codex CLI"
     if not details:
         details = f"exit status {completed.returncode}"
     return f"Codex CLI failed: {details[-1000:]}"
