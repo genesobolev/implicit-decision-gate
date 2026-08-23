@@ -93,7 +93,7 @@ behavior PostgreSQL observed, both supported policies and their resulting databa
 behavior, and a complete `idg answer` command for each choice. The application defines
 these verifiable choices; Codex does not select the missing policy.
 
-To make the correction visible, select the policy opposite
+To make the contract amendment visible, select the policy opposite
 `decision_request.observed.option`, then resume the durable run:
 
 ```bash
@@ -117,6 +117,28 @@ uv run idg show RUN_ID
 
 `resume` starts a fresh ephemeral Codex process automatically. The application reuses
 the Codex CLI's saved authentication; it does not ask for or read model API keys.
+
+## Walk through every stage in Jupyter
+
+The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) runs the same
+public CLI and opens each persisted stage in causal order: pinned inputs, exact
+project-controlled prompts, generated SQL, immutable digests, normalized PostgreSQL
+evidence, the evidence review, the typed owner decision, the clean retry, and the final
+deterministic check. Every section identifies the actor responsible for the action or
+evidence.
+
+Launch it from the repository root:
+
+```bash
+uv run --with 'jupyterlab>=4,<5' jupyter lab \
+    notebooks/implicit-decision-gate-walkthrough.ipynb
+```
+
+JupyterLab remains demo tooling rather than a project dependency. Run the launch command
+once before presenting so `uv` can cache it. The notebook invokes the live Codex and
+PostgreSQL path, creates a new durable run, and makes the typed owner choice an explicit
+cell to review or edit before resuming. The checked-in outputs are one representative
+live run; a new run may initially choose either supported rollout policy.
 
 ## Where the prompts come from
 
