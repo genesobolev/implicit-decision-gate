@@ -8,12 +8,33 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.cli import main
-from implicit_decision_gate.gate import EvidenceClassification, ReviewerResult
+from implicit_decision_gate.gate import (
+    EvidenceClassification,
+    ModelInvocationRecord,
+    ModelRole,
+    ReviewerResult,
+)
 from tests.conftest import ScriptMarkerProbe
 
 
 class DeterministicCodexClient:
     """Stand in for Codex at the CLI dependency boundary."""
+
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Return deterministic model provenance."""
+
+        return ModelInvocationRecord(
+            role=role,
+            attempt_number=attempt_number,
+            model="deterministic-test-client",
+            reasoning_effort="deterministic",
+            codex_cli_version="not-applicable",
+        )
 
     def propose_migration(self, prompt: str) -> str:
         if "Authoritative owner decision: PRESERVE_EXISTING" in prompt:
@@ -49,6 +70,10 @@ def test_cli_pauses_inspects_answers_and_resumes(
     started = json.loads(capsys.readouterr().out)
     assert started["state"] == "AWAITING_OWNER"
     assert "agent_backend" not in started
+    assert [record["role"] for record in started["model_invocations"]] == [
+        "CODING_AGENT",
+        "EVIDENCE_REVIEWER",
+    ]
     assert started["decision_request"] is not None
 
     run_id = started["run_id"]
@@ -82,6 +107,11 @@ def test_cli_pauses_inspects_answers_and_resumes(
     assert completed["state"] == "COMPLETED"
     assert completed["owner_option"] == "PRESERVE_EXISTING"
     assert completed["decision_request"] is None
+    assert [record["attempt_number"] for record in completed["model_invocations"]] == [
+        1,
+        None,
+        2,
+    ]
 
 
 def test_start_rejects_the_removed_backend_selector(

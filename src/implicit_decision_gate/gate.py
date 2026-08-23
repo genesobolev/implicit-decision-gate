@@ -43,6 +43,13 @@ class EvidenceClassification(StrEnum):
     UNCERTAIN = "UNCERTAIN"
 
 
+class ModelRole(StrEnum):
+    """Purpose of one persisted model invocation."""
+
+    CODING_AGENT = "CODING_AGENT"
+    EVIDENCE_REVIEWER = "EVIDENCE_REVIEWER"
+
+
 ROLLOUT_DESCRIPTIONS: dict[RolloutOption, str] = {
     RolloutOption.PRESERVE_EXISTING: (
         "Existing item-sharing links remain non-expiring with NULL; new links default "
@@ -93,6 +100,16 @@ class ReviewerResult(BaseModel):
     evidence_quote: str | None = None
 
 
+class ModelInvocationRecord(BaseModel):
+    """Auditable configuration for one model process."""
+
+    role: ModelRole
+    attempt_number: int | None = None
+    model: str
+    reasoning_effort: str
+    codex_cli_version: str
+
+
 class DecisionRecord(BaseModel):
     """The single typed owner decision in a run."""
 
@@ -122,6 +139,7 @@ class RunRecord(BaseModel):
     state: RunState
     original_brief: str
     base_commit: str
+    model_invocations: list[ModelInvocationRecord] = Field(default_factory=list)
     attempts: list[AttemptRecord] = Field(default_factory=list)
     reviewer_prompt: str | None = None
     reviewer_result: ReviewerResult | None = None
@@ -311,6 +329,9 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
     return {
         "run_id": run.run_id,
         "state": run.state,
+        "model_invocations": [
+            invocation.model_dump(mode="json") for invocation in run.model_invocations
+        ],
         "observed_option": observed,
         "classification": classification,
         "decision_request": decision_request_payload(run),

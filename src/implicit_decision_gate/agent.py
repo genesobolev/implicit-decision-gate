@@ -7,6 +7,8 @@ from typing import Protocol
 from implicit_decision_gate.gate import (
     OWNER_ROLLOUT_OPTIONS,
     ROLLOUT_DESCRIPTIONS,
+    ModelInvocationRecord,
+    ModelRole,
     ReviewerResult,
     RolloutOption,
 )
@@ -32,12 +34,28 @@ class AgentError(RuntimeError):
 class CodingClient(Protocol):
     """Generate one migration from a complete rendered prompt."""
 
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Describe the model process before it is invoked."""
+
     def propose_migration(self, prompt: str) -> str:
         """Return complete migration SQL without writing repository files."""
 
 
 class ReviewerClient(Protocol):
     """Classify one evidence question from a complete rendered prompt."""
+
+    def invocation_record(
+        self,
+        *,
+        role: ModelRole,
+        attempt_number: int | None,
+    ) -> ModelInvocationRecord:
+        """Describe the model process before it is invoked."""
 
     def review_evidence(self, prompt: str) -> ReviewerResult:
         """Return a normalized evidence classification."""
@@ -62,9 +80,7 @@ def build_coding_prompt(
     sections = [
         """You create exactly one PostgreSQL migration.
 Use only the supplied brief and baseline schema. Do not inspect or edit repository files.
-Return the complete migration as structured SQL, without transaction-control statements.
-The expires_at column must be a nullable timestamp with time zone. New rows must default
-to approximately 30 days from creation.""",
+Return the complete migration as structured SQL, without transaction-control statements.""",
         f"Original brief:\n{brief}",
         f"Baseline schema:\n{schema}",
     ]

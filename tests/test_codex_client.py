@@ -11,8 +11,12 @@ from typing import Any
 import pytest
 
 from implicit_decision_gate.agent import AgentError
-from implicit_decision_gate.codex_client import CodexCLIModelClient
-from implicit_decision_gate.gate import EvidenceClassification
+from implicit_decision_gate.codex_client import (
+    CODEX_MODEL,
+    CODEX_REASONING_EFFORT,
+    CodexCLIModelClient,
+)
+from implicit_decision_gate.gate import EvidenceClassification, ModelRole
 
 
 def test_codex_returns_one_structured_sql_result(
@@ -47,7 +51,11 @@ def test_codex_returns_one_structured_sql_result(
     assert "-C" not in command
     assert Path(captured["cwd"]).name.startswith("idg-codex-")
     assert command[-1] == "-"
-    assert "--model" not in command
+    assert command[command.index("--model") + 1] == CODEX_MODEL
+    assert command[command.index("--config") + 1] == (
+        f'model_reasoning_effort="{CODEX_REASONING_EFFORT}"'
+    )
+    assert "--strict-config" in command
     assert captured["prompt"] == "Create a migration."
     assert captured["schema"] == {
         "type": "object",
@@ -56,6 +64,36 @@ def test_codex_returns_one_structured_sql_result(
         "additionalProperties": False,
     }
     assert result == "SELECT 1;"
+
+
+def test_codex_invocation_record_contains_pinned_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="codex-cli 0.149.0\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/codex")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    record = CodexCLIModelClient().invocation_record(
+        role=ModelRole.CODING_AGENT,
+        attempt_number=1,
+    )
+
+    assert record.role is ModelRole.CODING_AGENT
+    assert record.attempt_number == 1
+    assert record.model == "gpt-5.6-terra"
+    assert record.reasoning_effort == "xhigh"
+    assert record.codex_cli_version == "codex-cli 0.149.0"
+    assert captured["command"] == ["/usr/local/bin/codex", "--version"]
 
 
 def test_codex_reviewer_uses_fresh_non_repo_process(

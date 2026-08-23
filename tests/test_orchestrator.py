@@ -12,6 +12,7 @@ import pytest
 from implicit_decision_gate.gate import (
     EvidenceClassification,
     GateError,
+    ModelRole,
     ReviewerResult,
     RolloutOption,
     RunState,
@@ -109,6 +110,12 @@ def test_awaiting_owner_is_durable_and_blocks_more_model_work(
     assert run.decision.selected is None
     assert run.attempts[0].coding_prompt == coding.prompts[0]
     assert run.reviewer_prompt == reviewer.prompts[0]
+    assert [invocation.role for invocation in run.model_invocations] == [
+        ModelRole.CODING_AGENT,
+        ModelRole.EVIDENCE_REVIEWER,
+    ]
+    assert run.model_invocations[0].attempt_number == 1
+    assert run.model_invocations[1].attempt_number is None
 
     blocked_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
     separate_process = orchestrator(
@@ -231,6 +238,12 @@ def test_owner_decision_regenerates_in_a_clean_context(
     assert completed.attempts[0].migration_digest == sha256_text(f"{first_sql}\n")
     assert completed.attempts[1].migration_digest == sha256_text("-- PRESERVE_EXISTING\n")
     assert completed.attempts[1].coding_prompt == second_client.prompts[0]
+    assert [invocation.role for invocation in completed.model_invocations] == [
+        ModelRole.CODING_AGENT,
+        ModelRole.EVIDENCE_REVIEWER,
+        ModelRole.CODING_AGENT,
+    ]
+    assert completed.model_invocations[-1].attempt_number == 2
 
     first_artifact = RunStore(reference_repo).run_path(first.run_id) / "attempt-1.sql"
     assert first_artifact.read_text(encoding="utf-8") == f"{first_sql}\n"
@@ -307,3 +320,23 @@ def test_unmodeled_first_attempt_fails_without_review(
     assert run.state is RunState.FAILED
     assert reviewer.prompts == []
     assert run.decision is None
+
+
+def test_failed_model_call_preserves_requested_invocation_provenance(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    run = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        ScriptedCodingClient([RuntimeError("model failed")]),
+        ScriptedReviewerClient([]),
+        ScriptMarkerProbe(),
+    ).start()
+
+    assert run.state is RunState.FAILED
+    assert [invocation.role for invocation in run.model_invocations] == [ModelRole.CODING_AGENT]
+    assert run.model_invocations[0].attempt_number == 1
+    assert run.error == "RuntimeError: model failed"
+    persisted = RunStore(reference_repo).load(run.run_id)
+    assert persisted.model_invocations == run.model_invocations
