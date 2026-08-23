@@ -74,7 +74,7 @@ Requirements:
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
 - An installed and authenticated [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode)
-- PostgreSQL 17, most easily provided by Docker with Compose
+- Docker with Compose, which supplies the PostgreSQL 17 verifier
 - [`jq`](https://jqlang.github.io/jq/) only for the optional manual inspection commands
 
 From the repository root:
@@ -145,8 +145,9 @@ JupyterLab remains demo tooling rather than a project dependency. Run the launch
 once before presenting so `uv` can cache it. The notebook invokes the live Codex and
 PostgreSQL path, creates a new durable run, and makes the typed owner choice an explicit
 cell to review or edit before resuming. The checked-in outputs are one representative
-live run in which the owner confirms the observed policy. A new run may initially choose
-either supported rollout policy, and the owner may confirm it or select the other one.
+live run in which the owner selects the other supported policy. A new run may initially
+choose either supported rollout policy, and the owner may confirm it or select the other
+one.
 
 ## Where the prompts come from
 
@@ -243,18 +244,17 @@ needs to observe real PostgreSQL DDL and default semantics: the column type and
 nullability, whether the seeded old row was backfilled, and what expiration a new row
 receives. Parsing SQL or running it against SQLite would not establish those effects.
 
-Docker Compose supplies a reproducible local PostgreSQL 17 instance with no production
-credentials or customer data. Each probe creates a fresh test database, executes through
-a limited role inside a transaction, records normalized observations, and rolls the
-transaction back. The container's data directory is temporary.
-
-Docker itself is not fundamental. If a compatible disposable PostgreSQL 17 instance is
-already available, point `IDG_POSTGRES_ADMIN_DSN` at it instead.
+Docker Compose is the demo's only PostgreSQL runtime. It supplies a reproducible local
+PostgreSQL 17 instance with fixed demo credentials and no production data. The public CLI
+uses the loopback connection defined by `compose.yaml`; that connection string is internal
+plumbing, not a user-selectable database target. Each probe creates a fresh test database,
+executes through a limited role inside a transaction, records normalized observations,
+and rolls the transaction back. The container's data directory is temporary.
 
 When finished with the Compose instance:
 
 ```bash
-docker compose down
+docker compose down --volumes
 ```
 
 ## Validate the implementation
@@ -265,7 +265,7 @@ The normal suite is deterministic and does not invoke Codex:
 uv run pytest
 ```
 
-To opt into the live Codex integration test after starting PostgreSQL:
+To opt into the live Codex integration test after starting the Compose service:
 
 ```bash
 IDG_LIVE_CODEX=1 uv run pytest tests/test_live.py -v
