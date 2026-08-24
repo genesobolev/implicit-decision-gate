@@ -8,8 +8,29 @@ leaves humans the consequential judgments that cannot be verified mechanically. 
 demo makes one such boundary executable: what happens when a system-observed effect
 reveals that the request never made a required choice?
 
-The repository demonstrates that question with one concrete migration, one observable
-ambiguity, and one typed human decision.
+## Motivation
+
+Long-running AI work can quietly make important choices that the original request never
+made. A request to add an export feature might not say who may export, how long exported
+files should be kept, or whether each export must be recorded. The code must still choose
+a behavior, and that choice can be hard to notice inside a large change.
+
+The larger idea behind this project is one shared gate for these missing decisions.
+Separate checks for important parts of a system report simple facts about what the agent
+actually changed. A database check can report what happens to existing data, a permission
+check can report who gained access, a storage check can report how long data is kept, and
+an API check can report behavior visible to other software. If a reported fact matters
+and the request contains no approved answer for it, the gate saves the work and asks a
+person.
+
+This scales by building each kind of check once and reusing it across many jobs. The
+shared gate handles saving, asking, resuming, and checking the next result for all of
+them. It does not promise to find every possible hidden choice. It covers important parts
+of a system where effects can be observed reliably.
+
+This repository implements one complete example of that wider design. PostgreSQL reports
+whether the proposed change preserves existing links or makes them expire. The database
+check is the only kind implemented here.
 
 ## The fictional 1Password scenario
 
