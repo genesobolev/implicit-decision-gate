@@ -1,0 +1,29 @@
+flowchart TD
+    probe[Normalized PostgreSQL probe result]
+    modeled{Modeled rollout option}
+    unmodeled[FAILED]
+    review[Evidence reviewer classification]
+    reviewResult{Evidence classification}
+    completeFirst[COMPLETED]
+    conflict[FAILED]
+    pause[AWAITING_OWNER]
+    answer[Owner selects typed option]
+    ready[READY_TO_RESUME]
+    retry[Fresh coding attempt and PostgreSQL probe]
+    equal{Observed option equals selected option}
+    completeSecond[COMPLETED]
+    mismatch[FAILED]
+
+    probe --> modeled
+    modeled -->|UNMODELED| unmodeled
+    modeled -->|PRESERVE_EXISTING or EXPIRE_EXISTING| review
+    review --> reviewResult
+    reviewResult -->|SUPPORTED| completeFirst
+    reviewResult -->|CONTRADICTED| conflict
+    reviewResult -->|NOT_EVIDENCED or UNCERTAIN| pause
+    pause --> answer
+    answer --> ready
+    ready --> retry
+    retry --> equal
+    equal -->|Yes| completeSecond
+    equal -->|No| mismatch
