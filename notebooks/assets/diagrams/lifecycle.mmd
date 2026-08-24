@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant O as Human job owner
+    participant G as Gate orchestrator
+    participant C1 as Codex coder attempt one
+    participant P as PostgreSQL verifier
+    participant R as Codex evidence reviewer
+    participant D as Deterministic gate
+    participant S as Durable run store
+    participant C2 as Codex coder attempt two
+
+    O->>G: Supply authoritative brief
+    G->>S: Persist pinned brief and commit
+    G->>C1: Send rendered prompt
+    C1-->>G: Return structured migration SQL
+    G->>S: Persist prompt SQL and digest
+    G->>P: Apply baseline and migration
+    P-->>G: Return normalized rollout option
+    G->>R: Send brief and observed behavior
+    R-->>G: Return evidence classification
+    G->>D: Evaluate evidence and typed facts
+    D-->>G: Return AWAITING_OWNER
+    G->>S: Persist AWAITING_OWNER
+    G-->>O: Request one typed rollout choice
+    O->>G: Select owner option
+    G->>S: Persist READY_TO_RESUME
+    G->>C2: Send fresh prompt with amendment
+    C2-->>G: Return regenerated migration SQL
+    G->>P: Apply baseline and regenerated migration
+    P-->>G: Return normalized rollout option
+    G->>D: Compare observed and selected options
+    D-->>G: Return COMPLETED or FAILED
+    G->>S: Persist COMPLETED or FAILED
