@@ -33,6 +33,32 @@ PostgreSQL scenario reports whether a proposed change preserves existing links o
 them expire. A workspace export scenario reports which roles can create an export and
 whether each request creates a job.
 
+## PostgreSQL structural surface
+
+The PostgreSQL observer also takes a catalog snapshot immediately before and after each
+migration. Three reusable rules turn the difference into sorted `ADDED`, `REMOVED`, and
+`CHANGED` effects:
+
+| Rule | Observed structure | Covered operations |
+| --- | --- | --- |
+| `schema_shape` | Tables and column type, nullability, and default | Create or drop a table; add or drop a column; change the three observed column properties |
+| `data_integrity` | Primary-key, unique, check, and foreign-key constraints | Add, remove, or replace an observed constraint |
+| `indexing` | Standalone index definition and uniqueness | Add, remove, or replace an index with transactional DDL |
+
+Each effect records the rule, change, object kind, schema-qualified identity, attribute,
+and before and after values in `observation.effects`. Constraint-owned indexes are
+reported as constraints rather than duplicated as indexes. The comparison itself is a
+small pure function; an exact PostgreSQL 17 test matrix makes changes to the catalog
+rules reviewable without changing the gate or orchestration code.
+
+This is a bounded structural surface, not a claim to understand arbitrary SQL. It
+observes the final structure of ordinary and partitioned tables in `public`. It does not
+run PostgreSQL operations that cannot execute inside its migration transaction. It also
+does not reveal transient operations, row rewrites, data loss, locks, or performance.
+Those need targeted behavioral probes. The share-link example shows why: both supported
+migrations produce the same final `expires_at` structure, but only a seeded-row probe
+reveals whether existing links were backfilled.
+
 ## The fictional share-link scenario
 
 Imagine a service behind 1Password item-sharing links. A brief asks a coding agent to
@@ -335,9 +361,11 @@ docker compose down --volumes
 
 ## Validate the implementation
 
-The normal suite is deterministic and does not invoke Codex. It covers both observer
-vocabularies and includes a six-case adversarial matrix for convergence, ignored owner
-decisions, and unmodeled outcomes:
+The normal suite is deterministic and does not invoke Codex. With the Compose service
+running, it checks exact PostgreSQL 17 effects for table, column, constraint, and index
+additions, removals, and changes. It also covers both decision vocabularies and includes
+a six-case adversarial matrix for convergence, ignored owner decisions, and unmodeled
+outcomes:
 
 ```bash
 uv run pytest

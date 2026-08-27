@@ -86,3 +86,11 @@ def test_postgres_probe_maps_reference_migrations(
     assert result.outcome == expected
     assert result.facts["rollback_verified"] is True
     assert result.facts["insert_without_value"] == "approximately_now_plus_30_days"
+    assert {
+        (effect.rule_id, effect.change, effect.identity, effect.attribute)
+        for effect in result.effects
+    } == {
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "data_type"),
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "default"),
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "nullable"),
+    }

@@ -13,10 +13,13 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from implicit_decision_gate.postgres_surface import (
+    CatalogSnapshot,
+    capture_catalog,
+    diff_catalogs,
+)
 from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
 
-EXPECTED_TABLE = "public.share_links"
-EXPECTED_COLUMN = "expires_at"
 EXPECTED_DATA_TYPE = "timestamp with time zone"
 PRESERVE_EXISTING = "PRESERVE_EXISTING"
 EXPIRE_EXISTING = "EXPIRE_EXISTING"
@@ -189,16 +192,19 @@ class PostgresProbe:
                 connection.execute(baseline_schema)
                 connection.execute("BEGIN")
                 try:
+                    baseline_snapshot = capture_catalog(connection)
                     migration_time_row = connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()
                     if migration_time_row is None:
                         raise ProbeError("PostgreSQL did not return the migration time")
                     migration_time = cast(datetime, migration_time_row[0])
                     connection.execute(migration)
+                    migrated_snapshot = capture_catalog(connection)
                     observation = self._observe(connection, migration_time)
                     result = normalize_observation(observation)
+                    result.effects = diff_catalogs(baseline_snapshot, migrated_snapshot)
                 finally:
                     connection.execute("ROLLBACK")
-                rollback_verified = self._rollback_verified(connection)
+                rollback_verified = self._rollback_verified(connection, baseline_snapshot)
                 result.facts["rollback_verified"] = rollback_verified
                 if not rollback_verified:
                     raise ProbeError("Migration transaction rollback could not be verified")
@@ -268,10 +274,9 @@ class PostgresProbe:
             migration_time=migration_time,
         )
 
-    def _rollback_verified(self, connection: psycopg.Connection[tuple[Any, ...]]) -> bool:
-        row = connection.execute(
-            "SELECT count(*) FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = 'share_links' "
-            "AND column_name = 'expires_at'"
-        ).fetchone()
-        return row is not None and row[0] == 0
+    def _rollback_verified(
+        self,
+        connection: psycopg.Connection[tuple[Any, ...]],
+        baseline_snapshot: CatalogSnapshot,
+    ) -> bool:
+        return capture_catalog(connection) == baseline_snapshot

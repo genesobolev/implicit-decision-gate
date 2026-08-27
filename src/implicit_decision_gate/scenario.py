@@ -4,13 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 type FactValue = str | int | bool | None
+type EffectChange = Literal["ADDED", "REMOVED", "CHANGED"]
 
 UNMODELED_OUTCOME = "UNMODELED"
+
+
+class ObservedEffect(BaseModel):
+    """One normalized system effect reported by a reusable rule."""
+
+    rule_id: str
+    change: EffectChange
+    object_kind: str
+    identity: str
+    attribute: str
+    before: FactValue = None
+    after: FactValue = None
 
 
 class ObservationResult(BaseModel):
@@ -18,6 +31,7 @@ class ObservationResult(BaseModel):
 
     outcome: str
     facts: dict[str, FactValue] = Field(default_factory=dict)
+    effects: list[ObservedEffect] = Field(default_factory=list)
 
 
 class EffectObserver(Protocol):
