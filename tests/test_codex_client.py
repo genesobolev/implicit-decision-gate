@@ -19,7 +19,7 @@ from implicit_decision_gate.codex_client import (
 from implicit_decision_gate.gate import EvidenceClassification, ModelRole
 
 
-def test_codex_returns_one_structured_sql_result(
+def test_codex_returns_one_structured_artifact_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -33,14 +33,14 @@ def test_codex_returns_one_structured_sql_result(
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout=json.dumps({"sql": "SELECT 1;"}),
+            stdout=json.dumps({"artifact": "SELECT 1;"}),
             stderr="",
         )
 
     monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/codex")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    result = CodexCLIModelClient().propose_migration("Create a migration.")
+    result = CodexCLIModelClient().propose_artifact("Create a migration.")
 
     command = captured["command"]
     assert command[:2] == ["/usr/local/bin/codex", "exec"]
@@ -59,8 +59,8 @@ def test_codex_returns_one_structured_sql_result(
     assert captured["prompt"] == "Create a migration."
     assert captured["schema"] == {
         "type": "object",
-        "properties": {"sql": {"type": "string"}},
-        "required": ["sql"],
+        "properties": {"artifact": {"type": "string"}},
+        "required": ["artifact"],
         "additionalProperties": False,
     }
     assert result == "SELECT 1;"
@@ -134,7 +134,7 @@ def test_codex_missing_binary_is_clear(
     monkeypatch.setattr(shutil, "which", lambda _name: None)
 
     with pytest.raises(AgentError, match="install and sign in"):
-        CodexCLIModelClient().propose_migration("prompt")
+        CodexCLIModelClient().propose_artifact("prompt")
 
 
 def test_codex_timeout_is_clear(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,7 +145,7 @@ def test_codex_timeout_is_clear(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", timeout)
 
     with pytest.raises(AgentError, match="timed out"):
-        CodexCLIModelClient(timeout_seconds=1).propose_migration("prompt")
+        CodexCLIModelClient(timeout_seconds=1).propose_artifact("prompt")
 
 
 @pytest.mark.parametrize(
@@ -173,10 +173,10 @@ def test_codex_timeout_is_clear(monkeypatch: pytest.MonkeyPatch) -> None:
             subprocess.CompletedProcess(
                 ["codex"],
                 0,
-                stdout=json.dumps({"sql": ""}),
+                stdout=json.dumps({"artifact": ""}),
                 stderr="",
             ),
-            "empty migration",
+            "empty artifact",
         ),
     ],
 )
@@ -189,4 +189,4 @@ def test_codex_failures_are_clear(
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: completed)
 
     with pytest.raises(AgentError, match=message):
-        CodexCLIModelClient().propose_migration("prompt")
+        CodexCLIModelClient().propose_artifact("prompt")

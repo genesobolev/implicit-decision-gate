@@ -5,26 +5,11 @@ from __future__ import annotations
 from typing import Protocol
 
 from implicit_decision_gate.gate import (
-    OWNER_ROLLOUT_OPTIONS,
-    ROLLOUT_DESCRIPTIONS,
     ModelInvocationRecord,
     ModelRole,
     ReviewerResult,
-    RolloutOption,
 )
-
-OWNER_ACCEPTANCE_CRITERIA: dict[RolloutOption, str] = {
-    RolloutOption.PRESERVE_EXISTING: (
-        "After migration, the seeded pre-existing row must read expires_at IS NULL. "
-        "In PostgreSQL, adding the column with its non-NULL default in one statement "
-        "would make existing rows read that default, so add the nullable column without "
-        "a default before setting the default for future inserts."
-    ),
-    RolloutOption.EXPIRE_EXISTING: (
-        "After migration, the seeded pre-existing row must read an expires_at value "
-        "approximately 30 days after migration time."
-    ),
-}
+from implicit_decision_gate.scenario import DecisionOption, Scenario, option_by_id
 
 
 class AgentError(RuntimeError):
@@ -32,7 +17,7 @@ class AgentError(RuntimeError):
 
 
 class CodingClient(Protocol):
-    """Generate one migration from a complete rendered prompt."""
+    """Generate one artifact from a complete rendered prompt."""
 
     def invocation_record(
         self,
@@ -42,8 +27,8 @@ class CodingClient(Protocol):
     ) -> ModelInvocationRecord:
         """Describe the model process before it is invoked."""
 
-    def propose_migration(self, prompt: str) -> str:
-        """Return complete migration SQL without writing repository files."""
+    def propose_artifact(self, prompt: str) -> str:
+        """Return one complete artifact without writing repository files."""
 
 
 class ReviewerClient(Protocol):
@@ -63,10 +48,11 @@ class ReviewerClient(Protocol):
 
 def build_coding_prompt(
     *,
+    scenario: Scenario,
     brief: str,
-    schema: str,
+    context: str,
     attempt_number: int,
-    owner_option: RolloutOption | None,
+    owner_option: str | None,
 ) -> str:
     """Render the complete and intentionally narrow coding context."""
 
@@ -74,37 +60,33 @@ def build_coding_prompt(
         raise AgentError(f"Unsupported coding attempt: {attempt_number}")
     if attempt_number == 1 and owner_option is not None:
         raise AgentError("Attempt one must not receive an owner decision")
-    if attempt_number == 2 and owner_option not in OWNER_ROLLOUT_OPTIONS:
+    selected = option_by_id(scenario.decision, owner_option) if owner_option else None
+    if attempt_number == 2 and selected is None:
         raise AgentError("Attempt two requires a modeled owner option")
 
     sections = [
-        """You create exactly one PostgreSQL migration.
-Use only the supplied brief and baseline schema. Do not inspect or edit repository files.
-Return the complete migration as structured SQL, without transaction-control statements.""",
+        scenario.coding_instructions,
         f"Original brief:\n{brief}",
-        f"Baseline schema:\n{schema}",
+        f"{scenario.context_label}:\n{context}",
     ]
-    if attempt_number == 2:
-        assert owner_option is not None
+    if selected is not None:
         sections.append(
-            f"Authoritative owner decision: {owner_option.value}\n"
-            f"Required behavior: {ROLLOUT_DESCRIPTIONS[owner_option]}\n"
-            f"PostgreSQL acceptance criteria: {OWNER_ACCEPTANCE_CRITERIA[owner_option]}"
+            f"Authoritative owner decision: {selected.id}\n"
+            f"Required behavior: {selected.behavior}\n"
+            f"Acceptance criteria: {selected.acceptance_criteria}"
         )
     return "\n\n".join(sections)
 
 
-def build_reviewer_prompt(*, brief: str, option: RolloutOption) -> str:
+def build_reviewer_prompt(*, brief: str, option: DecisionOption) -> str:
     """Render the complete evidence-only review context."""
 
-    if option not in OWNER_ROLLOUT_OPTIONS:
-        raise AgentError("Evidence review requires a modeled rollout option")
     return (
-        "Classify whether the brief explicitly supports the observed existing-row behavior.\n"
+        "Classify whether the brief explicitly supports the observed behavior.\n"
         "Return SUPPORTED, CONTRADICTED, NOT_EVIDENCED, or UNCERTAIN. SUPPORTED and\n"
         "CONTRADICTED require an exact quote from the brief; otherwise set evidence_quote\n"
         "to an empty string.\n\n"
         f"Original brief:\n{brief}\n\n"
-        f"Observed rollout option: {option.value}\n"
-        f"Observed behavior: {ROLLOUT_DESCRIPTIONS[option]}"
+        f"Observed option: {option.id}\n"
+        f"Observed behavior: {option.behavior}"
     )

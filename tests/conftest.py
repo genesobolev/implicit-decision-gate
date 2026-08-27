@@ -10,13 +10,15 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.agent import AgentError
+from implicit_decision_gate.api_probe import OWNER_AND_ADMIN, OWNER_ONLY
 from implicit_decision_gate.gate import (
     ModelInvocationRecord,
     ModelRole,
-    ProbeResult,
     ReviewerResult,
-    RolloutOption,
 )
+from implicit_decision_gate.probe import EXPIRE_EXISTING, PRESERVE_EXISTING
+from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult, Scenario
+from implicit_decision_gate.scenarios import scenario_registry
 
 BRIEF = """Add 30-day expiration support to item-sharing links.
 
@@ -30,10 +32,23 @@ SCHEMA = """CREATE TABLE public.share_links (
 );
 INSERT INTO public.share_links (token) VALUES ('existing-fixture');
 """
+AUTH_BRIEF = """Add workspace export creation.
+
+Workspace owners must receive 202 and create one export job. Workspace members must be
+denied with 403 and create no export job.
+"""
+AUTH_HANDLER = '''"""Baseline contract for workspace export creation."""
+
+
+def create_export(role: str, export_jobs: list[str]) -> int:
+    """Return the export result; role is "owner", "administrator", or "member"."""
+
+    raise NotImplementedError
+'''
 
 
 class ScriptedCodingClient:
-    """Return deterministic migrations while recording coding context."""
+    """Return deterministic artifacts while recording coding context."""
 
     def __init__(self, responses: Sequence[str | Exception]) -> None:
         self.responses = list(responses)
@@ -55,7 +70,7 @@ class ScriptedCodingClient:
             codex_cli_version="not-applicable",
         )
 
-    def propose_migration(self, prompt: str) -> str:
+    def propose_artifact(self, prompt: str) -> str:
         self.prompts.append(prompt)
         if not self.responses:
             raise AgentError("The scripted coding response queue is empty")
@@ -121,6 +136,12 @@ def reference_repo(tmp_path: Path) -> Path:
     (example / "brief.md").write_text(BRIEF, encoding="utf-8")
     (example / "schema.sql").write_text(SCHEMA, encoding="utf-8")
     (migrations / ".gitkeep").write_text("", encoding="utf-8")
+    authorization = repo / "examples" / "workspace-export-authorization"
+    implementations = authorization / "implementations"
+    implementations.mkdir(parents=True)
+    (authorization / "brief.md").write_text(AUTH_BRIEF, encoding="utf-8")
+    (authorization / "handler.py").write_text(AUTH_HANDLER, encoding="utf-8")
+    (implementations / ".gitkeep").write_text("", encoding="utf-8")
     (repo / ".gitignore").write_text(".idg/\n", encoding="utf-8")
     run_git(repo, "init", "-b", "main")
     run_git(repo, "add", ".")
@@ -139,28 +160,43 @@ def reference_repo(tmp_path: Path) -> Path:
 
 @dataclass
 class ScriptMarkerProbe:
-    """Classify explicit SQL markers without requiring PostgreSQL."""
+    """Classify explicit artifact markers without external execution."""
 
     calls: int = 0
 
-    def probe(self, migration: str, baseline_schema: str) -> ProbeResult:
+    def observe(self, artifact: str, context: str) -> ObservationResult:
         self.calls += 1
-        assert "share_links" in baseline_schema
-        if "PRESERVE_EXISTING" in migration:
-            option = RolloutOption.PRESERVE_EXISTING
+        if OWNER_AND_ADMIN in artifact:
+            assert "create_export" in context
+            return ObservationResult(outcome=OWNER_AND_ADMIN)
+        if OWNER_ONLY in artifact:
+            assert "create_export" in context
+            return ObservationResult(outcome=OWNER_ONLY)
+        if PRESERVE_EXISTING in artifact:
+            assert "share_links" in context
+            option = PRESERVE_EXISTING
             existing = "null"
-        elif "EXPIRE_EXISTING" in migration:
-            option = RolloutOption.EXPIRE_EXISTING
+        elif EXPIRE_EXISTING in artifact:
+            assert "share_links" in context
+            option = EXPIRE_EXISTING
             existing = "approximately_migration_time_plus_30_days"
         else:
-            option = RolloutOption.UNMODELED
+            option = UNMODELED_OUTCOME
             existing = "other"
-        return ProbeResult(
-            data_type="timestamp with time zone",
-            nullable=True,
-            column_default="CURRENT_TIMESTAMP + interval '30 days'",
-            insert_without_value="approximately_now_plus_30_days",
-            existing_row=existing,
-            rollout_option=option,
-            rollback_verified=True,
+        return ObservationResult(
+            outcome=option,
+            facts={
+                "data_type": "timestamp with time zone",
+                "nullable": True,
+                "column_default": "CURRENT_TIMESTAMP + interval '30 days'",
+                "insert_without_value": "approximately_now_plus_30_days",
+                "existing_row": existing,
+                "rollback_verified": True,
+            },
         )
+
+
+def scripted_scenarios(observer: ScriptMarkerProbe) -> dict[str, Scenario]:
+    """Build both scenarios around one deterministic observer."""
+
+    return scenario_registry(observer, observer)

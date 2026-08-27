@@ -14,17 +14,18 @@ from implicit_decision_gate.gate import (
     GateError,
     ModelRole,
     ReviewerResult,
-    RolloutOption,
     RunState,
     RunStore,
     sha256_text,
 )
 from implicit_decision_gate.orchestrator import Orchestrator
+from implicit_decision_gate.probe import EXPIRE_EXISTING, PRESERVE_EXISTING
 from tests.conftest import (
     ScriptedCodingClient,
     ScriptedReviewerClient,
     ScriptMarkerProbe,
     run_git,
+    scripted_scenarios,
 )
 
 RESUME_SCRIPT = """
@@ -33,13 +34,14 @@ from pathlib import Path
 
 from implicit_decision_gate.gate import GateError, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
-from tests.conftest import ScriptedCodingClient, ScriptMarkerProbe
+from tests.conftest import ScriptedCodingClient, ScriptMarkerProbe, scripted_scenarios
 
 try:
+    observer = ScriptMarkerProbe()
     run = Orchestrator(
         repo_path=Path(sys.argv[1]),
+        scenarios=scripted_scenarios(observer),
         coding_client=ScriptedCodingClient(["-- PRESERVE_EXISTING"]),
-        probe=ScriptMarkerProbe(),
         worktree_root=Path(sys.argv[3]),
     ).resume(sys.argv[2])
 except GateError as error:
@@ -69,9 +71,9 @@ def orchestrator(
 
     return Orchestrator(
         repo_path=repo,
+        scenarios=scripted_scenarios(probe),
         coding_client=coding_client,
         reviewer_client=reviewer_client,
-        probe=probe,
         worktree_root=worktree_root,
     )
 
@@ -106,7 +108,7 @@ def test_awaiting_owner_is_durable_and_blocks_more_model_work(
 
     assert run.state is RunState.AWAITING_OWNER
     assert run.decision is not None
-    assert run.decision.observed is RolloutOption.EXPIRE_EXISTING
+    assert run.decision.observed == EXPIRE_EXISTING
     assert run.decision.selected is None
     assert run.attempts[0].coding_prompt == coding.prompts[0]
     assert run.reviewer_prompt == reviewer.prompts[0]
@@ -164,9 +166,13 @@ def test_concurrent_resumes_execute_attempt_two_once(
         ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
     ).start()
-    Orchestrator(repo_path=reference_repo).answer(
+    observer = ScriptMarkerProbe()
+    Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scripted_scenarios(observer),
+    ).answer(
         run.run_id,
-        RolloutOption.PRESERVE_EXISTING,
+        PRESERVE_EXISTING,
     )
     store = RunStore(reference_repo)
     command = [
@@ -213,13 +219,17 @@ def test_owner_decision_regenerates_in_a_clean_context(
         ScriptMarkerProbe(),
     ).start()
 
-    answered = Orchestrator(repo_path=reference_repo).answer(
+    observer = ScriptMarkerProbe()
+    answered = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scripted_scenarios(observer),
+    ).answer(
         first.run_id,
-        RolloutOption.PRESERVE_EXISTING,
+        PRESERVE_EXISTING,
     )
     assert answered.state is RunState.READY_TO_RESUME
     assert answered.decision is not None
-    assert answered.decision.selected is RolloutOption.PRESERVE_EXISTING
+    assert answered.decision.selected == PRESERVE_EXISTING
     assert answered.decision.answered_at is not None
 
     second_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
@@ -235,8 +245,8 @@ def test_owner_decision_regenerates_in_a_clean_context(
     assert len(completed.attempts) == 2
     assert all(attempt.clean_start_verified for attempt in completed.attempts)
     assert completed.attempts[0].worktree_path != completed.attempts[1].worktree_path
-    assert completed.attempts[0].migration_digest == sha256_text(f"{first_sql}\n")
-    assert completed.attempts[1].migration_digest == sha256_text("-- PRESERVE_EXISTING\n")
+    assert completed.attempts[0].artifact_digest == sha256_text(f"{first_sql}\n")
+    assert completed.attempts[1].artifact_digest == sha256_text("-- PRESERVE_EXISTING\n")
     assert completed.attempts[1].coding_prompt == second_client.prompts[0]
     assert [invocation.role for invocation in completed.model_invocations] == [
         ModelRole.CODING_AGENT,
@@ -281,9 +291,13 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
         ScriptedReviewerClient([not_evidenced()]),
         ScriptMarkerProbe(),
     ).start()
-    Orchestrator(repo_path=reference_repo).answer(
+    observer = ScriptMarkerProbe()
+    Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scripted_scenarios(observer),
+    ).answer(
         first.run_id,
-        RolloutOption.PRESERVE_EXISTING,
+        PRESERVE_EXISTING,
     )
     second_client = ScriptedCodingClient([second_sql])
     failed = orchestrator(
@@ -298,9 +312,12 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
     assert len(failed.attempts) == 2
     assert len(second_client.prompts) == 1
     with pytest.raises(GateError, match="AWAITING_OWNER"):
-        Orchestrator(repo_path=reference_repo).answer(
+        Orchestrator(
+            repo_path=reference_repo,
+            scenarios=scripted_scenarios(observer),
+        ).answer(
             first.run_id,
-            RolloutOption.EXPIRE_EXISTING,
+            EXPIRE_EXISTING,
         )
 
 

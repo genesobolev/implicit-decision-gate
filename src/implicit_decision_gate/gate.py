@@ -15,6 +15,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from implicit_decision_gate.scenario import (
+    DecisionSpec,
+    ObservationResult,
+    option_by_id,
+)
+
 
 class RunState(StrEnum):
     """Allowed persisted run states."""
@@ -24,14 +30,6 @@ class RunState(StrEnum):
     READY_TO_RESUME = "READY_TO_RESUME"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-
-
-class RolloutOption(StrEnum):
-    """Modeled existing-row rollout behaviors."""
-
-    PRESERVE_EXISTING = "PRESERVE_EXISTING"
-    EXPIRE_EXISTING = "EXPIRE_EXISTING"
-    UNMODELED = "UNMODELED"
 
 
 class EvidenceClassification(StrEnum):
@@ -50,25 +48,6 @@ class ModelRole(StrEnum):
     EVIDENCE_REVIEWER = "EVIDENCE_REVIEWER"
 
 
-ROLLOUT_DESCRIPTIONS: dict[RolloutOption, str] = {
-    RolloutOption.PRESERVE_EXISTING: (
-        "Existing item-sharing links remain non-expiring with NULL; new links default "
-        "to approximately 30 days after creation; expires_at remains nullable."
-    ),
-    RolloutOption.EXPIRE_EXISTING: (
-        "Existing item-sharing links receive an expiration approximately 30 days from "
-        "migration; new links default to approximately 30 days after creation; expires_at "
-        "remains nullable."
-    ),
-    RolloutOption.UNMODELED: "The migration does not match either supported rollout behavior.",
-}
-
-OWNER_ROLLOUT_OPTIONS = (
-    RolloutOption.PRESERVE_EXISTING,
-    RolloutOption.EXPIRE_EXISTING,
-)
-
-
 def utc_now() -> datetime:
     """Return a timezone-aware current timestamp."""
 
@@ -79,18 +58,6 @@ def sha256_text(value: str) -> str:
     """Return the SHA-256 digest for UTF-8 text."""
 
     return hashlib.sha256(value.encode()).hexdigest()
-
-
-class ProbeResult(BaseModel):
-    """Normalized observable migration behavior."""
-
-    data_type: str | None = None
-    nullable: bool | None = None
-    column_default: str | None = None
-    insert_without_value: str = "unavailable"
-    existing_row: str = "unavailable"
-    rollout_option: RolloutOption
-    rollback_verified: bool = False
 
 
 class ReviewerResult(BaseModel):
@@ -113,9 +80,9 @@ class ModelInvocationRecord(BaseModel):
 class DecisionRecord(BaseModel):
     """The single typed owner decision in a run."""
 
-    decision_id: str = "existing_item_sharing_link_rollout"
-    observed: RolloutOption
-    selected: RolloutOption | None = None
+    decision_id: str
+    observed: str
+    selected: str | None = None
     answered_at: datetime | None = None
 
 
@@ -126,8 +93,8 @@ class AttemptRecord(BaseModel):
     worktree_path: str
     clean_start_verified: bool
     coding_prompt: str | None = None
-    migration_digest: str | None = None
-    probe_result: ProbeResult | None = None
+    artifact_digest: str | None = None
+    observation: ObservationResult | None = None
     started_at: datetime = Field(default_factory=utc_now)
     completed_at: datetime | None = None
 
@@ -136,6 +103,7 @@ class RunRecord(BaseModel):
     """Complete durable state for one gate run."""
 
     run_id: str
+    scenario_id: str
     state: RunState
     original_brief: str
     base_commit: str
@@ -216,20 +184,26 @@ class RunStore:
         except FileNotFoundError as error:
             raise GateError(f"Run does not exist: {run_id}") from error
 
-    def persist_migration(self, run_id: str, attempt_number: int, migration: str) -> str:
-        """Write the immutable migration copy and return its digest."""
+    def persist_artifact(
+        self,
+        run_id: str,
+        attempt_number: int,
+        suffix: str,
+        artifact: str,
+    ) -> str:
+        """Write one immutable artifact copy and return its digest."""
 
         if attempt_number not in (1, 2):
             raise GateError(f"Invalid attempt number: {attempt_number}")
-        path = self.run_path(run_id) / f"attempt-{attempt_number}.sql"
-        stored_migration = migration if migration.endswith("\n") else f"{migration}\n"
+        path = self.run_path(run_id) / f"attempt-{attempt_number}{suffix}"
+        stored_artifact = artifact if artifact.endswith("\n") else f"{artifact}\n"
         try:
             with path.open("x", encoding="utf-8") as file_handle:
-                file_handle.write(stored_migration)
+                file_handle.write(stored_artifact)
         except FileExistsError as error:
-            raise GateError(f"Attempt {attempt_number} migration is already immutable") from error
+            raise GateError(f"Attempt {attempt_number} artifact is already immutable") from error
         path.chmod(0o444)
-        return sha256_text(stored_migration)
+        return sha256_text(stored_artifact)
 
 
 def validate_reviewer_result(brief: str, result: ReviewerResult) -> ReviewerResult:
@@ -269,57 +243,60 @@ def state_after_review(classification: EvidenceClassification) -> RunState:
     raise AssertionError(f"Unhandled evidence classification: {classification}")
 
 
-def answer_owner(run: RunRecord, option: RolloutOption) -> None:
+def answer_owner(run: RunRecord, option_id: str, decision: DecisionSpec) -> None:
     """Record the only owner answer and advance a paused run."""
 
     if run.state is not RunState.AWAITING_OWNER:
         raise GateError(f"answer requires AWAITING_OWNER, found {run.state}")
-    if option not in OWNER_ROLLOUT_OPTIONS:
-        raise GateError(f"{option.value} is not an owner option")
+    if option_by_id(decision, option_id) is None:
+        raise GateError(f"{option_id} is not an owner option")
     if run.decision is None:
         raise GateError("The paused run has no decision to answer")
-    run.decision.selected = option
+    if run.decision.decision_id != decision.id:
+        raise GateError("The paused run has a different decision")
+    run.decision.selected = option_id
     run.decision.answered_at = utc_now()
     run.state = RunState.READY_TO_RESUME
 
 
-def decision_request_payload(run: RunRecord) -> dict[str, Any] | None:
+def decision_request_payload(
+    run: RunRecord,
+    decision: DecisionSpec,
+) -> dict[str, Any] | None:
     """Build the actionable owner decision request for a paused run."""
 
     if run.state is not RunState.AWAITING_OWNER:
         return None
     if run.decision is None:
         raise GateError("The paused run has no decision to present")
-
-    observed = run.decision.observed
+    observed = option_by_id(decision, run.decision.observed)
+    if observed is None:
+        raise GateError(f"Observed outcome is not an owner option: {run.decision.observed}")
     return {
-        "id": run.decision.decision_id,
-        "question": "What should happen to existing item-sharing links?",
-        "reason": (
-            "The gate could not establish from the brief whether the 30-day expiration "
-            "should apply to existing item-sharing links."
-        ),
+        "id": decision.id,
+        "question": decision.question,
+        "reason": decision.reason,
         "observed": {
-            "option": observed,
-            "behavior": ROLLOUT_DESCRIPTIONS[observed],
+            "option": observed.id,
+            "behavior": observed.behavior,
         },
         "options": [
             {
-                "option": option,
-                "behavior": ROLLOUT_DESCRIPTIONS[option],
-                "command": f"uv run idg answer {run.run_id} --option {option.value}",
+                "option": option.id,
+                "behavior": option.behavior,
+                "command": f"uv run idg answer {run.run_id} --option {option.id}",
             }
-            for option in OWNER_ROLLOUT_OPTIONS
+            for option in decision.options
         ],
     }
 
 
-def show_payload(run: RunRecord) -> dict[str, Any]:
+def show_payload(run: RunRecord, decision: DecisionSpec) -> dict[str, Any]:
     """Build the stable CLI summary for a run."""
 
     observed = (
-        run.attempts[-1].probe_result.rollout_option
-        if run.attempts and run.attempts[-1].probe_result
+        run.attempts[-1].observation.outcome
+        if run.attempts and run.attempts[-1].observation
         else None
     )
     classification = run.reviewer_result.classification if run.reviewer_result else None
@@ -328,21 +305,22 @@ def show_payload(run: RunRecord) -> dict[str, Any]:
         final_worktree_path = run.attempts[-1].worktree_path
     return {
         "run_id": run.run_id,
+        "scenario": run.scenario_id,
         "state": run.state,
         "model_invocations": [
             invocation.model_dump(mode="json") for invocation in run.model_invocations
         ],
         "observed_option": observed,
         "classification": classification,
-        "decision_request": decision_request_payload(run),
+        "decision_request": decision_request_payload(run, decision),
         "owner_option": run.decision.selected if run.decision else None,
-        "attempt_digests": [attempt.migration_digest for attempt in run.attempts],
+        "attempt_digests": [attempt.artifact_digest for attempt in run.attempts],
         "final_worktree_path": final_worktree_path,
         "error": run.error,
     }
 
 
-def render_show(run: RunRecord) -> str:
+def render_show(run: RunRecord, decision: DecisionSpec) -> str:
     """Render the stable CLI summary as JSON."""
 
-    return json.dumps(show_payload(run), indent=2, default=str)
+    return json.dumps(show_payload(run, decision), indent=2, default=str)

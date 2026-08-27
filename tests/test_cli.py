@@ -37,7 +37,7 @@ class DeterministicCodexClient:
             codex_cli_version="not-applicable",
         )
 
-    def propose_migration(self, prompt: str) -> str:
+    def propose_artifact(self, prompt: str) -> str:
         if "Authoritative owner decision: PRESERVE_EXISTING" in prompt:
             return "-- PRESERVE_EXISTING"
         return "-- EXPIRE_EXISTING"
@@ -77,6 +77,7 @@ def test_cli_pauses_inspects_answers_and_resumes(
     assert probe_dsns == [COMPOSE_ADMIN_DSN]
     started = json.loads(capsys.readouterr().out)
     assert started["state"] == "AWAITING_OWNER"
+    assert started["scenario"] == "share-link-expiration"
     assert "agent_backend" not in started
     assert [record["role"] for record in started["model_invocations"]] == [
         "CODING_AGENT",
@@ -111,7 +112,7 @@ def test_cli_pauses_inspects_answers_and_resumes(
     assert answered["decision_request"] is None
 
     assert main(["resume", run_id]) == 0
-    assert probe_dsns == [COMPOSE_ADMIN_DSN, COMPOSE_ADMIN_DSN]
+    assert probe_dsns == [COMPOSE_ADMIN_DSN] * 4
     completed = json.loads(capsys.readouterr().out)
     assert completed["state"] == "COMPLETED"
     assert completed["owner_option"] == "PRESERVE_EXISTING"
