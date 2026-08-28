@@ -23,20 +23,65 @@
             </div>
 
             <nav class="app-tabs" role="tablist" aria-label="Application views">
-                <button id="walkthrough-tab" type="button" role="tab" data-view="walkthrough" aria-selected="true" aria-controls="walkthrough-view">Walkthrough</button>
+                <button id="workflow-tab" type="button" role="tab" data-view="workflow" aria-selected="true" aria-controls="workflow-view">Workflow</button>
+                <button id="walkthrough-tab" type="button" role="tab" data-view="walkthrough" aria-selected="false" aria-controls="walkthrough-view">Guided replay</button>
                 <button id="coverage-tab" type="button" role="tab" data-view="coverage" aria-selected="false" aria-controls="coverage-view">Observer coverage</button>
             </nav>
         </header>
 
         <main class="app-main">
-            <section class="app-view" id="walkthrough-view" role="tabpanel" aria-labelledby="walkthrough-tab" data-view-panel="walkthrough">
+            <section class="app-view" id="workflow-view" role="tabpanel" aria-labelledby="workflow-tab" data-view-panel="workflow">
+                <div class="view-header">
+                    <div>
+                        <p class="eyebrow">System workflow</p>
+                        <h1>Inspect every route through the gate</h1>
+                        <p>Select any node to inspect its trigger, persisted evidence, scenario facts, and possible next states.</p>
+                    </div>
+                </div>
+
+                <div class="workflow-shell">
+                    <div class="workflow-toolbar">
+                        <div class="workflow-scenario-summary">
+                            <span class="toolbar-label">Example</span>
+                            <strong id="workflow-scenario-name">Workspace export authorization</strong>
+                            <span id="workflow-scenario-detail">Two independent API behavior decisions</span>
+                        </div>
+                        <div class="workflow-example-switch" role="tablist" aria-label="Workflow example">
+                            <button type="button" role="tab" data-workflow-scenario="api" aria-selected="true">
+                                <span>API</span>
+                                <small>Workspace export</small>
+                            </button>
+                            <button type="button" role="tab" data-workflow-scenario="database" aria-selected="false">
+                                <span>Database</span>
+                                <small>Share-link expiration</small>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="workflow-legend" aria-label="Workflow state legend">
+                        <span><i class="legend-dot legend-normal"></i>Execution</span>
+                        <span><i class="legend-dot legend-owner"></i>Human input</span>
+                        <span><i class="legend-dot legend-complete"></i>Completed</span>
+                        <span><i class="legend-dot legend-gap"></i>Coverage gap</span>
+                        <span><i class="legend-dot legend-failed"></i>Failed</span>
+                    </div>
+
+                    <div class="workflow-canvas-scroll" role="region" tabindex="0" aria-label="Scrollable workflow graph">
+                        <div class="workflow-canvas" id="workflow-canvas"></div>
+                    </div>
+
+                    <section class="workflow-inspector" id="workflow-inspector" aria-live="polite"></section>
+                </div>
+            </section>
+
+            <section class="app-view" id="walkthrough-view" role="tabpanel" aria-labelledby="walkthrough-tab" data-view-panel="walkthrough" hidden>
                 <div class="view-header">
                     <div>
                         <p class="eyebrow">Guided replay</p>
                         <h1>Walk through an implicit decision</h1>
                         <p>Follow a deterministic example from observed behavior through human input and verification.</p>
                     </div>
-                    <div class="scenario-tabs" role="tablist" aria-label="Walkthrough example">
+                    <div class="scenario-tabs walkthrough-scenario-tabs" role="tablist" aria-label="Walkthrough example">
                         <button type="button" role="tab" data-scenario="api" aria-selected="true">API example</button>
                         <button type="button" role="tab" data-scenario="database" aria-selected="false">Database example</button>
                     </div>
