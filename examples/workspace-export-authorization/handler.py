@@ -2,5 +2,5 @@
 
 
 def create_export(role: str, export_jobs: list[str]) -> int:
-    """Return the export result; role is "owner", "administrator", or "member"."""
+    """Return the result; export_jobs contains the workspace's existing jobs."""
     raise NotImplementedError

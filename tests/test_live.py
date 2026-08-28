@@ -19,6 +19,7 @@ from implicit_decision_gate.gate import RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import (
     COMPOSE_ADMIN_DSN,
+    EXISTING_LINK_ROLLOUT,
     EXPIRE_EXISTING,
     PRESERVE_EXISTING,
     PostgresProbe,
@@ -48,13 +49,13 @@ def test_live_model_honors_preserve_owner_decision() -> None:
         brief=BRIEF,
         context=SCHEMA,
         attempt_number=2,
-        owner_option=PRESERVE_EXISTING,
+        owner_options={EXISTING_LINK_ROLLOUT: PRESERVE_EXISTING},
     )
 
     artifact = CodexCLIModelClient().propose_artifact(prompt)
     result = PostgresProbe(COMPOSE_ADMIN_DSN).observe(artifact, SCHEMA)
 
-    assert result.outcome == PRESERVE_EXISTING
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: PRESERVE_EXISTING}
 
 
 @pytest.mark.skipif(
@@ -78,10 +79,11 @@ def test_live_model_can_pause_and_complete_second_attempt(
         record.reasoning_effort == CODEX_REASONING_EFFORT for record in first.model_invocations
     )
     assert first.attempts[0].observation is not None
-    observed = first.attempts[0].observation.outcome
+    observed = first.attempts[0].observation.outcomes[EXISTING_LINK_ROLLOUT]
     selected = EXPIRE_EXISTING if observed == PRESERVE_EXISTING else PRESERVE_EXISTING
     Orchestrator(repo_path=reference_repo, scenarios=LIVE_SCENARIOS).answer(
         first.run_id,
+        EXISTING_LINK_ROLLOUT,
         selected,
     )
     completed = Orchestrator(
@@ -93,5 +95,5 @@ def test_live_model_can_pause_and_complete_second_attempt(
     ).resume(first.run_id)
     assert completed.state is RunState.COMPLETED
     assert completed.attempts[1].observation is not None
-    assert completed.attempts[1].observation.outcome == selected
+    assert completed.attempts[1].observation.outcomes[EXISTING_LINK_ROLLOUT] == selected
     assert len(completed.model_invocations) == 3

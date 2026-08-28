@@ -27,9 +27,9 @@ class ObservedEffect(BaseModel):
 
 
 class ObservationResult(BaseModel):
-    """Normalized facts and one bounded observed outcome."""
+    """Normalized facts and bounded outcomes keyed by decision identifier."""
 
-    outcome: str
+    outcomes: dict[str, str]
     facts: dict[str, FactValue] = Field(default_factory=dict)
     effects: list[ObservedEffect] = Field(default_factory=list)
 
@@ -71,8 +71,14 @@ class Scenario:
     artifact_directory: Path
     artifact_suffix: str
     coding_instructions: str
-    decision: DecisionSpec
+    decisions: tuple[DecisionSpec, ...]
     observer: EffectObserver
+
+
+def decision_by_id(decisions: tuple[DecisionSpec, ...], decision_id: str) -> DecisionSpec | None:
+    """Return one declared decision by identifier."""
+
+    return next((decision for decision in decisions if decision.id == decision_id), None)
 
 
 def option_by_id(decision: DecisionSpec, option_id: str) -> DecisionOption | None:

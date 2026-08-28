@@ -9,6 +9,7 @@ import pytest
 
 from implicit_decision_gate.probe import (
     COMPOSE_ADMIN_DSN,
+    EXISTING_LINK_ROLLOUT,
     EXPIRE_EXISTING,
     PRESERVE_EXISTING,
     Observation,
@@ -67,7 +68,7 @@ def test_normalize_maps_both_reference_behaviors(
             migration_time=migration_time,
         )
     )
-    assert result.outcome == expected
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
 
 
 @pytest.mark.skipif(not postgres_available(), reason="PostgreSQL 17 probe container is not running")
@@ -83,7 +84,7 @@ def test_postgres_probe_maps_reference_migrations(
     expected: str,
 ) -> None:
     result = PostgresProbe(COMPOSE_ADMIN_DSN).observe(migration, SCHEMA)
-    assert result.outcome == expected
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
     assert result.facts["rollback_verified"] is True
     assert result.facts["insert_without_value"] == "approximately_now_plus_30_days"
     assert {

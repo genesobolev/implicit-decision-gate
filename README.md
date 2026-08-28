@@ -5,8 +5,8 @@ inside the trust architecture described in 1Password's
 [Verified Loops](https://1password.com/blog/verified-loops-building-ai-agent-trust).
 That architecture makes the human-owned job definition the verification boundary and
 leaves humans the consequential judgments that cannot be verified mechanically. This
-demo makes one such boundary executable: what happens when a system-observed effect
-reveals that the request never made a required choice?
+demo makes that boundary executable: what happens when system-observed effects reveal
+choices that the request never made?
 
 ## Motivation
 
@@ -84,9 +84,10 @@ or the links are publicly accessible.
 
 ## The workspace export authorization scenario
 
-A second brief asks the coding agent to add workspace export creation. It says owners
-must receive 202 and create one export job, while members must receive 403 and create no
-job. It does not say whether administrators are authorized.
+A second brief asks the coding agent to add workspace export creation. It says that,
+when no export job exists, owners must receive 202 and create one job, while members must
+receive 403 and create no job. It does not say whether administrators are authorized or
+what a second owner request should do when an export job already exists.
 
 The generated artifact is one Python module exposing this function:
 
@@ -94,35 +95,41 @@ The generated artifact is one Python module exposing this function:
 def create_export(role: str, export_jobs: list[str]) -> int: ...
 ```
 
-A disposable, network-disabled container calls the function as an owner, administrator,
-and member. The observer checks both the returned status and the number of jobs created,
-then normalizes the result to one of two supported outcomes:
+A disposable, network-disabled container calls the function twice as an owner using the
+same job list, then once each as an administrator and member using fresh lists. The
+observer checks both the returned status and the number of jobs created. From those four
+calls, it reports two independent decisions:
 
-| Decision | Owner | Administrator | Member |
-| --- | --- | --- | --- |
-| `OWNER_ONLY` | 202, one job | 403, no job | 403, no job |
-| `OWNER_AND_ADMIN` | 202, one job | 202, one job | 403, no job |
+| Decision ID | Option | Observed behavior |
+| --- | --- | --- |
+| `workspace_export_administrator_access` | `OWNER_ONLY` | Administrator receives 403 and creates no job |
+| `workspace_export_administrator_access` | `OWNER_AND_ADMIN` | Administrator receives 202 and creates one job |
+| `workspace_export_repeat_request` | `CREATE_ANOTHER_EXPORT` | Second owner request receives 202 and creates another job |
+| `workspace_export_repeat_request` | `REUSE_ACTIVE_EXPORT` | Second owner request receives 202 and creates no additional job |
 
-Any other combination is `UNMODELED` and fails the run. The gate asks the owner whether
-administrators should be allowed, starts a fresh coding attempt with that answer, and
-observes the result again.
+The first owner request and member request must still match the brief. Any unsupported
+combination is `UNMODELED` and fails the run. Otherwise the gate reviews both decisions,
+shows both missing choices in one pause, records one answer for each, and starts one fresh
+coding attempt containing both answers. The same observer then verifies both outcomes.
 
 ## Where the demo fits in a verified loop
 
 1. The application pins the scenario brief and technical context to one Git commit and
-   creates a clean, detached worktree. Codex receives those exact inputs in an isolated
-   non-repository process, and the application writes its proposed artifact into the
-   worktree.
+    creates a clean, detached worktree. Codex receives those exact inputs in an isolated
+    non-repository process, and the application writes its proposed artifact into the
+    worktree.
 2. The scenario's disposable observer executes the artifact and normalizes its effects
-   into a small outcome vocabulary.
-3. A separate evidence reviewer sees only the brief and the normalized observed behavior.
-4. Because the brief is silent about one observed choice, the run durably pauses in
-   `AWAITING_OWNER`.
-5. An owner records one of the scenario's two supported answers.
+    into one or more small outcome vocabularies.
+3. A separate evidence reviewer independently compares each normalized behavior with the
+    brief.
+4. If the brief is silent about one or more observed choices, the run durably pauses in
+    `AWAITING_OWNER` and presents all of them together.
+5. An owner records one supported answer for each missing choice.
 6. The application creates another clean worktree at the original commit. A new isolated
-   coding invocation receives its brief, context, and owner decision without being given
-   the checkout as its working root or receiving the first artifact or reviewer rationale.
-7. The same observer verifies the regenerated artifact directly against that decision.
+    coding invocation receives its brief, context, and owner decisions without being given
+    the checkout as its working root or receiving the first artifact or reviewer rationale.
+7. The same observer verifies every regenerated outcome directly against the completed
+    decision set.
 
 The important signal comes from system-observed effects, not the coding agent's
 description of its own work. The pause is durable, so model execution and human judgment
@@ -166,10 +173,10 @@ uv run idg start --scenario workspace-export-authorization
 ```
 
 `start` invokes the locally authenticated Codex CLI. Copy the returned `run_id`; the
-reference run stops in `AWAITING_OWNER` after its first artifact chooses one of the two
-outcomes the brief left open. Its `decision_request` shows why the run paused, the
-observed outcome, and both supported choices. The application defines these verifiable
-choices; Codex does not select the missing policy.
+reference run stops in `AWAITING_OWNER` after its first artifact chooses outcomes the
+brief left open. Its `decision_requests` list shows why the run paused, each observed
+outcome, and the supported choices. The application defines these verifiable choices;
+Codex does not select the missing policy.
 
 The application pins every coding and evidence-review invocation to
 [`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) with
@@ -178,35 +185,43 @@ and records the model, reasoning effort, invocation role, attempt number, and Co
 version in `run.json`. The model slug is fixed by this repository; it is not a claim that
 the provider's underlying weights are an immutable dated snapshot.
 
-To make the contract amendment visible, select the policy opposite
-`observed_option`, then resume the durable run. For the share-link scenario:
+To make the contract amendment visible, select the policy opposite the value in
+`observed_options`, then resume the durable run. For the share-link scenario:
 
 ```bash
 # If Codex chose EXPIRE_EXISTING:
-uv run idg answer RUN_ID --option PRESERVE_EXISTING
+uv run idg answer RUN_ID \
+    --decision existing_item_sharing_link_rollout \
+    --option PRESERVE_EXISTING
 
 # If Codex chose PRESERVE_EXISTING:
-uv run idg answer RUN_ID --option EXPIRE_EXISTING
+uv run idg answer RUN_ID \
+    --decision existing_item_sharing_link_rollout \
+    --option EXPIRE_EXISTING
 
 uv run idg resume RUN_ID
 ```
 
-For the workspace export scenario:
+The workspace export scenario returns two decision requests. Answer each one before
+resuming. For example:
 
 ```bash
-# If Codex chose OWNER_AND_ADMIN:
-uv run idg answer RUN_ID --option OWNER_ONLY
-
-# If Codex chose OWNER_ONLY:
-uv run idg answer RUN_ID --option OWNER_AND_ADMIN
+uv run idg answer RUN_ID \
+    --decision workspace_export_administrator_access \
+    --option OWNER_ONLY
+uv run idg answer RUN_ID \
+    --decision workspace_export_repeat_request \
+    --option REUSE_ACTIVE_EXPORT
 
 uv run idg resume RUN_ID
 ```
 
-`answer` only records the selected option. It does not invoke Codex or interpret free
-text. `resume` deliberately remains separate so execution can occur later or in another
-process. `show` is optional and returns the same structured decision request while the
-run is paused:
+The other valid options are `OWNER_AND_ADMIN` and `CREATE_ANOTHER_EXPORT`. Each `answer`
+records exactly one selected option and does not invoke Codex or interpret free text. A
+run with another unanswered request remains in `AWAITING_OWNER`; the last answer advances
+it to `READY_TO_RESUME`. `resume` deliberately remains separate so execution can occur
+later or in another process. `show` is optional and returns the remaining structured
+decision requests while the run is paused:
 
 ```bash
 uv run idg show RUN_ID
@@ -236,9 +251,9 @@ once before presenting so `uv` can cache it. The notebook invokes the live Codex
 PostgreSQL path, creates a new durable run, and makes the typed owner choice an explicit
 cell to review or edit before resuming. The checked-in outputs are one representative
 earlier live run in which the owner selects the other supported policy. The notebook
-notes its earlier database-specific field names; rerunning uses the current generic
-fields. A new run may initially choose either supported rollout policy, and the owner may
-confirm it or select the other one.
+notes that its checked outputs use the earlier singular record fields and answer syntax;
+rerunning the current source cells uses the plural schema. A new run may initially choose
+either supported rollout policy, and the owner may confirm it or select the other one.
 
 ## Where the prompts come from
 
@@ -258,15 +273,15 @@ The brief is the human-owned engineering ticket. The rendered coding prompt is a
 application-owned execution envelope, not an engineer's reinterpretation of that ticket.
 The first request combines isolation and structured-output instructions with the
 verbatim brief and technical context. The second is a new request containing the same
-inputs plus the selected owner option and its required behavior. It does not contain
+inputs plus every selected owner option and its required behavior. It does not contain
 attempt one's artifact, model response, or review rationale. The reviewer receives only
 the verbatim brief and the normalized behavior the scenario observer produced.
 
 The brief is stored separately and embedded in each applicable prompt because every
 Codex process is ephemeral and needs its complete input. Persisting both also lets an
 auditor compare the source contract with the exact materialized prompt. Product
-requirements are not repeated in the prompt envelope; attempt two's additional behavior
-and acceptance criteria are the explicit owner amendment.
+requirements are not repeated in the prompt envelope; attempt two's additional behaviors
+and acceptance criteria are the explicit owner amendments.
 
 Each Codex process runs from a fresh temporary directory instead of the repository. Its
 sandbox is read-only, user configuration is ignored, and the application is the only
@@ -306,9 +321,9 @@ Inspect the complete record and the most useful attempt evidence:
 ```bash
 jq . .idg/runs/RUN_ID/run.json
 jq '.model_invocations' .idg/runs/RUN_ID/run.json
-jq '{state, decision, reviewer_result}' .idg/runs/RUN_ID/run.json
+jq '{state, decisions}' .idg/runs/RUN_ID/run.json
 jq -r '.attempts[].coding_prompt' .idg/runs/RUN_ID/run.json
-jq -r '.reviewer_prompt' .idg/runs/RUN_ID/run.json
+jq -r '.decisions[].reviewer_prompt' .idg/runs/RUN_ID/run.json
 jq '.attempts[] | {number, worktree_path, artifact_digest, observation}' \
     .idg/runs/RUN_ID/run.json
 ```
@@ -330,9 +345,9 @@ sed -n '1,200p' \
     /PATH/FROM/THE/PREVIOUS/COMMAND/examples/share-link-expiration/migrations/idg-*.sql
 ```
 
-In each attempt record, compare `observation.outcome` with `decision.selected`. The
-artifact shows the proposed mechanism; the observation shows the effect the scenario's
-runtime produced.
+In each attempt record, compare `observation.outcomes` with the `observed` and `selected`
+values in `decisions`. The artifact shows the proposed mechanism; the observation shows
+the effects the scenario's runtime produced.
 
 ## Why Docker is involved
 
@@ -349,9 +364,9 @@ executes through a limited role inside a transaction, records normalized observa
 and rolls the transaction back. The container's data directory is temporary.
 
 The workspace export observer runs the generated Python module in a disposable,
-network-disabled, read-only container. It calls `create_export` for the three modeled
-roles and records only each returned status and job count. It does not start an HTTP
-server or add an application framework.
+network-disabled, read-only container. It calls `create_export` twice for the owner and
+once for each of the other two modeled roles, recording only each returned status and job
+count. It does not start an HTTP server or add an application framework.
 
 When finished with the Compose instance:
 
@@ -363,9 +378,9 @@ docker compose down --volumes
 
 The normal suite is deterministic and does not invoke Codex. With the Compose service
 running, it checks exact PostgreSQL 17 effects for table, column, constraint, and index
-additions, removals, and changes. It also covers both decision vocabularies and includes
-a six-case adversarial matrix for convergence, ignored owner decisions, and unmodeled
-outcomes:
+additions, removals, and changes. It also covers all three decision vocabularies and
+includes an eight-case adversarial matrix for convergence, ignored owner decisions, and
+unmodeled outcomes:
 
 ```bash
 uv run pytest

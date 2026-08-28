@@ -21,6 +21,7 @@ from implicit_decision_gate.postgres_surface import (
 from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
 
 EXPECTED_DATA_TYPE = "timestamp with time zone"
+EXISTING_LINK_ROLLOUT = "existing_item_sharing_link_rollout"
 PRESERVE_EXISTING = "PRESERVE_EXISTING"
 EXPIRE_EXISTING = "EXPIRE_EXISTING"
 COMPOSE_ADMIN_DSN = "postgresql://idg_admin:idg_admin@127.0.0.1:55432/postgres"
@@ -99,7 +100,7 @@ def normalize_observation(observation: Observation) -> ObservationResult:
         option = EXPIRE_EXISTING
 
     return ObservationResult(
-        outcome=option,
+        outcomes={EXISTING_LINK_ROLLOUT: option},
         facts={
             "data_type": observation.data_type,
             "nullable": observation.nullable,

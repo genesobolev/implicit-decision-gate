@@ -10,13 +10,24 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.agent import AgentError
-from implicit_decision_gate.api_probe import OWNER_AND_ADMIN, OWNER_ONLY
+from implicit_decision_gate.api_probe import (
+    ADMINISTRATOR_ACCESS,
+    CREATE_ANOTHER_EXPORT,
+    OWNER_AND_ADMIN,
+    OWNER_ONLY,
+    REPEAT_REQUEST,
+    REUSE_ACTIVE_EXPORT,
+)
 from implicit_decision_gate.gate import (
     ModelInvocationRecord,
     ModelRole,
     ReviewerResult,
 )
-from implicit_decision_gate.probe import EXPIRE_EXISTING, PRESERVE_EXISTING
+from implicit_decision_gate.probe import (
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
+)
 from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult, Scenario
 from implicit_decision_gate.scenarios import scenario_registry
 
@@ -34,14 +45,14 @@ INSERT INTO public.share_links (token) VALUES ('existing-fixture');
 """
 AUTH_BRIEF = """Add workspace export creation.
 
-Workspace owners must receive 202 and create one export job. Workspace members must be
-denied with 403 and create no export job.
+When no export job exists, workspace owners must receive 202 and create one export job.
+Workspace members must be denied with 403 and create no export job.
 """
 AUTH_HANDLER = '''"""Baseline contract for workspace export creation."""
 
 
 def create_export(role: str, export_jobs: list[str]) -> int:
-    """Return the export result; role is "owner", "administrator", or "member"."""
+    """Return the result; export_jobs contains the workspace's existing jobs."""
 
     raise NotImplementedError
 '''
@@ -166,12 +177,23 @@ class ScriptMarkerProbe:
 
     def observe(self, artifact: str, context: str) -> ObservationResult:
         self.calls += 1
-        if OWNER_AND_ADMIN in artifact:
-            assert "create_export" in context
-            return ObservationResult(outcome=OWNER_AND_ADMIN)
-        if OWNER_ONLY in artifact:
-            assert "create_export" in context
-            return ObservationResult(outcome=OWNER_ONLY)
+        if "create_export" in context:
+            administrator = UNMODELED_OUTCOME
+            if OWNER_AND_ADMIN in artifact:
+                administrator = OWNER_AND_ADMIN
+            elif OWNER_ONLY in artifact:
+                administrator = OWNER_ONLY
+            repeat = UNMODELED_OUTCOME
+            if CREATE_ANOTHER_EXPORT in artifact:
+                repeat = CREATE_ANOTHER_EXPORT
+            elif REUSE_ACTIVE_EXPORT in artifact:
+                repeat = REUSE_ACTIVE_EXPORT
+            return ObservationResult(
+                outcomes={
+                    ADMINISTRATOR_ACCESS: administrator,
+                    REPEAT_REQUEST: repeat,
+                }
+            )
         if PRESERVE_EXISTING in artifact:
             assert "share_links" in context
             option = PRESERVE_EXISTING
@@ -184,7 +206,7 @@ class ScriptMarkerProbe:
             option = UNMODELED_OUTCOME
             existing = "other"
         return ObservationResult(
-            outcome=option,
+            outcomes={EXISTING_LINK_ROLLOUT: option},
             facts={
                 "data_type": "timestamp with time zone",
                 "nullable": True,

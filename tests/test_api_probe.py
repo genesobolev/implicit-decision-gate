@@ -10,10 +10,14 @@ from typing import Any
 import pytest
 
 from implicit_decision_gate.api_probe import (
+    ADMINISTRATOR_ACCESS,
     CONTAINER_TIMEOUT_SECONDS,
+    CREATE_ANOTHER_EXPORT,
     OWNER_AND_ADMIN,
     OWNER_ONLY,
     PROBE_TIMEOUT_SECONDS,
+    REPEAT_REQUEST,
+    REUSE_ACTIVE_EXPORT,
     AuthorizationObservation,
     DockerAuthorizationProbe,
     RoleResult,
@@ -21,46 +25,65 @@ from implicit_decision_gate.api_probe import (
 )
 from implicit_decision_gate.scenario import UNMODELED_OUTCOME
 
+OWNER = RoleResult(status=202, jobs_created=1)
+DENIED = RoleResult(status=403, jobs_created=0)
+REUSED = RoleResult(status=202, jobs_created=0)
+INVALID = RoleResult(status=500, jobs_created=0)
+
 
 @pytest.mark.parametrize(
-    ("observation", "expected_outcome"),
+    ("observation", "administrator_outcome", "repeat_outcome"),
     [
+        (AuthorizationObservation(OWNER, OWNER, DENIED, DENIED), OWNER_ONLY, CREATE_ANOTHER_EXPORT),
+        (AuthorizationObservation(OWNER, REUSED, DENIED, DENIED), OWNER_ONLY, REUSE_ACTIVE_EXPORT),
         (
-            AuthorizationObservation(
-                owner=RoleResult(status=202, jobs_created=1),
-                administrator=RoleResult(status=403, jobs_created=0),
-                member=RoleResult(status=403, jobs_created=0),
-            ),
-            OWNER_ONLY,
-        ),
-        (
-            AuthorizationObservation(
-                owner=RoleResult(status=202, jobs_created=1),
-                administrator=RoleResult(status=202, jobs_created=1),
-                member=RoleResult(status=403, jobs_created=0),
-            ),
+            AuthorizationObservation(OWNER, OWNER, OWNER, DENIED),
             OWNER_AND_ADMIN,
+            CREATE_ANOTHER_EXPORT,
         ),
         (
-            AuthorizationObservation(
-                owner=RoleResult(status=202, jobs_created=0),
-                administrator=RoleResult(status=202, jobs_created=1),
-                member=RoleResult(status=403, jobs_created=0),
-            ),
+            AuthorizationObservation(OWNER, REUSED, OWNER, DENIED),
+            OWNER_AND_ADMIN,
+            REUSE_ACTIVE_EXPORT,
+        ),
+        (
+            AuthorizationObservation(OWNER, OWNER, INVALID, DENIED),
+            UNMODELED_OUTCOME,
+            CREATE_ANOTHER_EXPORT,
+        ),
+        (
+            AuthorizationObservation(OWNER, INVALID, DENIED, DENIED),
+            OWNER_ONLY,
+            UNMODELED_OUTCOME,
+        ),
+        (
+            AuthorizationObservation(OWNER, OWNER, DENIED, INVALID),
+            UNMODELED_OUTCOME,
+            CREATE_ANOTHER_EXPORT,
+        ),
+        (
+            AuthorizationObservation(INVALID, OWNER, DENIED, DENIED),
+            UNMODELED_OUTCOME,
             UNMODELED_OUTCOME,
         ),
     ],
 )
 def test_normalize_authorization(
     observation: AuthorizationObservation,
-    expected_outcome: str,
+    administrator_outcome: str,
+    repeat_outcome: str,
 ) -> None:
     result = normalize_authorization(observation)
 
-    assert result.outcome == expected_outcome
+    assert result.outcomes == {
+        ADMINISTRATOR_ACCESS: administrator_outcome,
+        REPEAT_REQUEST: repeat_outcome,
+    }
     assert result.facts == {
         "owner_status": observation.owner.status,
         "owner_jobs_created": observation.owner.jobs_created,
+        "repeat_owner_status": observation.repeat_owner.status,
+        "repeat_owner_jobs_created": observation.repeat_owner.jobs_created,
         "administrator_status": observation.administrator.status,
         "administrator_jobs_created": observation.administrator.jobs_created,
         "member_status": observation.member.status,
@@ -86,6 +109,7 @@ def test_docker_observer_parses_output_with_execution_limits(
             stdout=json.dumps(
                 {
                     "owner": {"status": 202, "jobs_created": 1},
+                    "repeat_owner": {"status": 202, "jobs_created": 0},
                     "administrator": {"status": 403, "jobs_created": 0},
                     "member": {"status": 403, "jobs_created": 0},
                 }
@@ -117,4 +141,7 @@ def test_docker_observer_parses_output_with_execution_limits(
         "timeout": PROBE_TIMEOUT_SECONDS,
         "check": False,
     }
-    assert result.outcome == OWNER_ONLY
+    assert result.outcomes == {
+        ADMINISTRATOR_ACCESS: OWNER_ONLY,
+        REPEAT_REQUEST: REUSE_ACTIVE_EXPORT,
+    }

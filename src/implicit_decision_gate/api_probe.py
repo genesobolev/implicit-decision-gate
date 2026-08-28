@@ -13,6 +13,10 @@ from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
 
 OWNER_ONLY = "OWNER_ONLY"
 OWNER_AND_ADMIN = "OWNER_AND_ADMIN"
+CREATE_ANOTHER_EXPORT = "CREATE_ANOTHER_EXPORT"
+REUSE_ACTIVE_EXPORT = "REUSE_ACTIVE_EXPORT"
+ADMINISTRATOR_ACCESS = "workspace_export_administrator_access"
+REPEAT_REQUEST = "workspace_export_repeat_request"
 PYTHON_IMAGE = "python:3.12-alpine"
 PROBE_TIMEOUT_SECONDS = 60
 CONTAINER_TIMEOUT_SECONDS = 30
@@ -30,12 +34,19 @@ module = importlib.util.module_from_spec(spec)
 with contextlib.redirect_stdout(io.StringIO()):
     spec.loader.exec_module(module)
 
-results = {}
-for role in ("owner", "administrator", "member"):
-    jobs = []
+def call(role, jobs):
+    before = len(jobs)
     with contextlib.redirect_stdout(io.StringIO()):
         status = module.create_export(role, jobs)
-    results[role] = {"status": status, "jobs_created": len(jobs)}
+    return {"status": status, "jobs_created": len(jobs) - before}
+
+owner_jobs = []
+results = {
+    "owner": call("owner", owner_jobs),
+    "repeat_owner": call("owner", owner_jobs),
+    "administrator": call("administrator", []),
+    "member": call("member", []),
+}
 print(json.dumps(results))
 """
 
@@ -57,28 +68,40 @@ class AuthorizationObservation:
     """Observed behavior for all three modeled caller roles."""
 
     owner: RoleResult
+    repeat_owner: RoleResult
     administrator: RoleResult
     member: RoleResult
 
 
 def normalize_authorization(observation: AuthorizationObservation) -> ObservationResult:
-    """Map role behavior to one of the two supported authorization policies."""
+    """Map authorization and repeated-request behavior to supported policies."""
 
-    outcome = UNMODELED_OUTCOME
-    required_behavior_matches = observation.owner == RoleResult(
-        status=202, jobs_created=1
-    ) and observation.member == RoleResult(status=403, jobs_created=0)
-    if required_behavior_matches:
+    administrator_outcome = UNMODELED_OUTCOME
+    repeat_outcome = UNMODELED_OUTCOME
+    first_owner_matches = observation.owner == RoleResult(status=202, jobs_created=1)
+    if first_owner_matches:
+        if observation.repeat_owner == RoleResult(status=202, jobs_created=1):
+            repeat_outcome = CREATE_ANOTHER_EXPORT
+        elif observation.repeat_owner == RoleResult(status=202, jobs_created=0):
+            repeat_outcome = REUSE_ACTIVE_EXPORT
+
+    member_matches = observation.member == RoleResult(status=403, jobs_created=0)
+    if first_owner_matches and member_matches:
         if observation.administrator == RoleResult(status=403, jobs_created=0):
-            outcome = OWNER_ONLY
+            administrator_outcome = OWNER_ONLY
         elif observation.administrator == RoleResult(status=202, jobs_created=1):
-            outcome = OWNER_AND_ADMIN
+            administrator_outcome = OWNER_AND_ADMIN
 
     return ObservationResult(
-        outcome=outcome,
+        outcomes={
+            ADMINISTRATOR_ACCESS: administrator_outcome,
+            REPEAT_REQUEST: repeat_outcome,
+        },
         facts={
             "owner_status": observation.owner.status,
             "owner_jobs_created": observation.owner.jobs_created,
+            "repeat_owner_status": observation.repeat_owner.status,
+            "repeat_owner_jobs_created": observation.repeat_owner.jobs_created,
             "administrator_status": observation.administrator.status,
             "administrator_jobs_created": observation.administrator.jobs_created,
             "member_status": observation.member.status,
@@ -148,6 +171,7 @@ def _parse_observation(payload: str) -> AuthorizationObservation:
         decoded = json.loads(payload)
         return AuthorizationObservation(
             owner=_parse_role(decoded, "owner"),
+            repeat_owner=_parse_role(decoded, "repeat_owner"),
             administrator=_parse_role(decoded, "administrator"),
             member=_parse_role(decoded, "member"),
         )

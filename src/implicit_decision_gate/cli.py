@@ -37,6 +37,7 @@ def _parser() -> argparse.ArgumentParser:
 
     answer = subparsers.add_parser("answer", help="Record the owner decision")
     answer.add_argument("run_id")
+    answer.add_argument("--decision", required=True)
     answer.add_argument("--option", required=True)
 
     resume = subparsers.add_parser("resume", help="Execute the second attempt")
@@ -73,7 +74,7 @@ def _state_orchestrator(repo_path: Path) -> Orchestrator:
 def _render(orchestrator: Orchestrator, run_id: str) -> str:
     run = orchestrator.store.load(run_id)
     scenario = orchestrator.scenarios[run.scenario_id]
-    return render_show(run, scenario.decision)
+    return render_show(run, scenario.decisions)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -93,7 +94,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if arguments.command == "answer":
             orchestrator = _state_orchestrator(repo_path)
-            run = orchestrator.answer(arguments.run_id, arguments.option)
+            run = orchestrator.answer(
+                arguments.run_id,
+                arguments.decision,
+                arguments.option,
+            )
             print(_render(orchestrator, run.run_id))
             return 0
         if arguments.command == "resume":

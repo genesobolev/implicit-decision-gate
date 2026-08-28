@@ -9,6 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from implicit_decision_gate.api_probe import (
+    ADMINISTRATOR_ACCESS,
+    CREATE_ANOTHER_EXPORT,
+    OWNER_AND_ADMIN,
+    OWNER_ONLY,
+    REPEAT_REQUEST,
+    REUSE_ACTIVE_EXPORT,
+)
 from implicit_decision_gate.gate import (
     EvidenceClassification,
     GateError,
@@ -19,7 +27,16 @@ from implicit_decision_gate.gate import (
     sha256_text,
 )
 from implicit_decision_gate.orchestrator import Orchestrator
-from implicit_decision_gate.probe import EXPIRE_EXISTING, PRESERVE_EXISTING
+from implicit_decision_gate.probe import (
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
+)
+from implicit_decision_gate.scenario import ObservationResult
+from implicit_decision_gate.scenarios import (
+    WORKSPACE_EXPORT_AUTHORIZATION,
+    scenario_registry,
+)
 from tests.conftest import (
     ScriptedCodingClient,
     ScriptedReviewerClient,
@@ -58,6 +75,17 @@ def not_evidenced() -> ReviewerResult:
         classification=EvidenceClassification.NOT_EVIDENCED,
         evidence_quote=None,
     )
+
+
+class FixedOutcomeProbe:
+    """Return one exact outcome mapping for boundary tests."""
+
+    def __init__(self, outcomes: dict[str, str]) -> None:
+        self.outcomes = outcomes
+
+    def observe(self, artifact: str, context: str) -> ObservationResult:
+        del artifact, context
+        return ObservationResult(outcomes=self.outcomes)
 
 
 def orchestrator(
@@ -107,17 +135,19 @@ def test_awaiting_owner_is_durable_and_blocks_more_model_work(
     ).start()
 
     assert run.state is RunState.AWAITING_OWNER
-    assert run.decision is not None
-    assert run.decision.observed == EXPIRE_EXISTING
-    assert run.decision.selected is None
+    assert len(run.decisions) == 1
+    assert run.decisions[0].observed == EXPIRE_EXISTING
+    assert run.decisions[0].selected is None
     assert run.attempts[0].coding_prompt == coding.prompts[0]
-    assert run.reviewer_prompt == reviewer.prompts[0]
+    assert run.decisions[0].reviewer_prompt == reviewer.prompts[0]
+    assert run.decisions[0].reviewer_result == not_evidenced()
     assert [invocation.role for invocation in run.model_invocations] == [
         ModelRole.CODING_AGENT,
         ModelRole.EVIDENCE_REVIEWER,
     ]
     assert run.model_invocations[0].attempt_number == 1
     assert run.model_invocations[1].attempt_number is None
+    assert run.model_invocations[1].decision_id == EXISTING_LINK_ROLLOUT
 
     blocked_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
     separate_process = orchestrator(
@@ -172,6 +202,7 @@ def test_concurrent_resumes_execute_attempt_two_once(
         scenarios=scripted_scenarios(observer),
     ).answer(
         run.run_id,
+        EXISTING_LINK_ROLLOUT,
         PRESERVE_EXISTING,
     )
     store = RunStore(reference_repo)
@@ -225,12 +256,12 @@ def test_owner_decision_regenerates_in_a_clean_context(
         scenarios=scripted_scenarios(observer),
     ).answer(
         first.run_id,
+        EXISTING_LINK_ROLLOUT,
         PRESERVE_EXISTING,
     )
     assert answered.state is RunState.READY_TO_RESUME
-    assert answered.decision is not None
-    assert answered.decision.selected == PRESERVE_EXISTING
-    assert answered.decision.answered_at is not None
+    assert answered.decisions[0].selected == PRESERVE_EXISTING
+    assert answered.decisions[0].answered_at is not None
 
     second_client = ScriptedCodingClient(["-- PRESERVE_EXISTING"])
     completed = orchestrator(
@@ -260,7 +291,10 @@ def test_owner_decision_regenerates_in_a_clean_context(
     assert stat.S_IMODE(first_artifact.stat().st_mode) == 0o444
 
     second_prompt = second_client.prompts[0]
-    assert "Authoritative owner decision: PRESERVE_EXISTING" in second_prompt
+    assert (
+        f"Authoritative owner decision for {EXISTING_LINK_ROLLOUT}: PRESERVE_EXISTING"
+        in second_prompt
+    )
     assert "FIRST_MIGRATION_SECRET" not in second_prompt
     assert "NOT_EVIDENCED" not in second_prompt
 
@@ -276,6 +310,114 @@ def test_owner_decision_regenerates_in_a_clean_context(
     )
     assert len(second_migrations) == 1
     assert "FIRST_MIGRATION_SECRET" not in second_migrations[0].read_text(encoding="utf-8")
+
+
+def test_two_decisions_are_answered_before_one_clean_retry(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    first_artifact = f"# FIRST_SECRET {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}"
+    second_artifact = f"# {OWNER_ONLY} {REUSE_ACTIVE_EXPORT}"
+    coding = ScriptedCodingClient([first_artifact, second_artifact])
+    controller = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        coding,
+        ScriptedReviewerClient([not_evidenced(), not_evidenced()]),
+        ScriptMarkerProbe(),
+    )
+
+    run = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert run.state is RunState.AWAITING_OWNER
+    assert [decision.decision_id for decision in run.decisions] == [
+        ADMINISTRATOR_ACCESS,
+        REPEAT_REQUEST,
+    ]
+    assert [invocation.decision_id for invocation in run.model_invocations] == [
+        None,
+        ADMINISTRATOR_ACCESS,
+        REPEAT_REQUEST,
+    ]
+
+    partially_answered = controller.answer(run.run_id, ADMINISTRATOR_ACCESS, OWNER_ONLY)
+    assert partially_answered.state is RunState.AWAITING_OWNER
+    with pytest.raises(GateError, match="already answered"):
+        controller.answer(run.run_id, ADMINISTRATOR_ACCESS, OWNER_ONLY)
+    with pytest.raises(GateError, match="READY_TO_RESUME"):
+        controller.resume(run.run_id)
+
+    answered = controller.answer(run.run_id, REPEAT_REQUEST, REUSE_ACTIVE_EXPORT)
+    assert answered.state is RunState.READY_TO_RESUME
+    completed = controller.resume(run.run_id)
+
+    assert completed.state is RunState.COMPLETED
+    assert len(completed.attempts) == 2
+    assert [decision.selected for decision in completed.decisions] == [
+        OWNER_ONLY,
+        REUSE_ACTIVE_EXPORT,
+    ]
+    second_prompt = coding.prompts[1]
+    assert f"Authoritative owner decision for {ADMINISTRATOR_ACCESS}: {OWNER_ONLY}" in second_prompt
+    assert (
+        f"Authoritative owner decision for {REPEAT_REQUEST}: {REUSE_ACTIVE_EXPORT}" in second_prompt
+    )
+    assert "FIRST_SECRET" not in second_prompt
+    assert completed.decisions[0].reviewer_prompt not in second_prompt
+    assert [invocation.role for invocation in completed.model_invocations] == [
+        ModelRole.CODING_AGENT,
+        ModelRole.EVIDENCE_REVIEWER,
+        ModelRole.EVIDENCE_REVIEWER,
+        ModelRole.CODING_AGENT,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("second_administrator", "expected_state"),
+    [
+        (OWNER_ONLY, RunState.COMPLETED),
+        (OWNER_AND_ADMIN, RunState.FAILED),
+    ],
+)
+def test_retry_verifies_supported_outcome_while_honoring_owner_answer(
+    reference_repo: Path,
+    tmp_path: Path,
+    second_administrator: str,
+    expected_state: RunState,
+) -> None:
+    coding = ScriptedCodingClient(
+        [
+            f"# {OWNER_ONLY} {CREATE_ANOTHER_EXPORT}",
+            f"# {second_administrator} {REUSE_ACTIVE_EXPORT}",
+        ]
+    )
+    controller = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        coding,
+        ScriptedReviewerClient(
+            [
+                ReviewerResult(
+                    classification=EvidenceClassification.SUPPORTED,
+                    evidence_quote="Add workspace export creation.",
+                ),
+                not_evidenced(),
+            ]
+        ),
+        ScriptMarkerProbe(),
+    )
+    run = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert run.state is RunState.AWAITING_OWNER
+    assert run.decisions[0].reviewer_result is not None
+    assert run.decisions[0].reviewer_result.classification is EvidenceClassification.SUPPORTED
+    answered = controller.answer(run.run_id, REPEAT_REQUEST, REUSE_ACTIVE_EXPORT)
+    assert answered.state is RunState.READY_TO_RESUME
+    completed = controller.resume(run.run_id)
+
+    assert completed.state is expected_state
+    assert completed.decisions[0].selected is None
+    assert completed.decisions[1].selected == REUSE_ACTIVE_EXPORT
 
 
 @pytest.mark.parametrize("second_sql", ["-- EXPIRE_EXISTING", "-- OTHER"])
@@ -297,6 +439,7 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
         scenarios=scripted_scenarios(observer),
     ).answer(
         first.run_id,
+        EXISTING_LINK_ROLLOUT,
         PRESERVE_EXISTING,
     )
     second_client = ScriptedCodingClient([second_sql])
@@ -317,6 +460,7 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
             scenarios=scripted_scenarios(observer),
         ).answer(
             first.run_id,
+            EXISTING_LINK_ROLLOUT,
             EXPIRE_EXISTING,
         )
 
@@ -336,7 +480,41 @@ def test_unmodeled_first_attempt_fails_without_review(
 
     assert run.state is RunState.FAILED
     assert reviewer.prompts == []
-    assert run.decision is None
+    assert run.decisions == []
+
+
+@pytest.mark.parametrize(
+    "outcomes",
+    [
+        {ADMINISTRATOR_ACCESS: OWNER_ONLY},
+        {
+            ADMINISTRATOR_ACCESS: OWNER_ONLY,
+            REPEAT_REQUEST: CREATE_ANOTHER_EXPORT,
+            "undeclared": "OUTCOME",
+        },
+    ],
+)
+def test_first_attempt_requires_exact_declared_outcomes_before_review(
+    reference_repo: Path,
+    tmp_path: Path,
+    outcomes: dict[str, str],
+) -> None:
+    reviewer = ScriptedReviewerClient([])
+    observer = FixedOutcomeProbe(outcomes)
+    controller = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(observer, observer),
+        coding_client=ScriptedCodingClient([f"# {OWNER_ONLY} {CREATE_ANOTHER_EXPORT}"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    result = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert result.state is RunState.FAILED
+    assert result.error == "Attempt one did not return exactly the declared decision outcomes"
+    assert reviewer.prompts == []
+    assert result.decisions == []
 
 
 def test_failed_model_call_preserves_requested_invocation_provenance(

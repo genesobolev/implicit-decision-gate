@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from implicit_decision_gate.api_probe import OWNER_AND_ADMIN, OWNER_ONLY
-from implicit_decision_gate.probe import EXPIRE_EXISTING, PRESERVE_EXISTING
+from implicit_decision_gate.api_probe import (
+    ADMINISTRATOR_ACCESS,
+    CREATE_ANOTHER_EXPORT,
+    OWNER_AND_ADMIN,
+    OWNER_ONLY,
+    REPEAT_REQUEST,
+    REUSE_ACTIVE_EXPORT,
+)
+from implicit_decision_gate.probe import (
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
+)
 from implicit_decision_gate.scenario import (
     DecisionOption,
     DecisionSpec,
@@ -37,34 +48,36 @@ def scenario_registry(
             "Return the complete migration as the structured artifact, without "
             "transaction-control statements."
         ),
-        decision=DecisionSpec(
-            id="existing_item_sharing_link_rollout",
-            question="What should happen to existing item-sharing links?",
-            reason=(
-                "The gate could not establish from the brief whether the 30-day expiration "
-                "should apply to existing item-sharing links."
-            ),
-            options=(
-                DecisionOption(
-                    id=PRESERVE_EXISTING,
-                    behavior=("Existing item-sharing links remain non-expiring with NULL."),
-                    acceptance_criteria=(
-                        "After migration, the seeded pre-existing row must read expires_at IS "
-                        "NULL. In PostgreSQL, adding the column with its non-NULL default in one "
-                        "statement would make existing rows read that default, so add the "
-                        "nullable column without a default before setting the default for future "
-                        "inserts."
-                    ),
+        decisions=(
+            DecisionSpec(
+                id=EXISTING_LINK_ROLLOUT,
+                question="What should happen to existing item-sharing links?",
+                reason=(
+                    "The gate could not establish from the brief whether the 30-day expiration "
+                    "should apply to existing item-sharing links."
                 ),
-                DecisionOption(
-                    id=EXPIRE_EXISTING,
-                    behavior=(
-                        "Existing item-sharing links receive an expiration approximately 30 days "
-                        "from migration."
+                options=(
+                    DecisionOption(
+                        id=PRESERVE_EXISTING,
+                        behavior=("Existing item-sharing links remain non-expiring with NULL."),
+                        acceptance_criteria=(
+                            "After migration, the seeded pre-existing row must read expires_at IS "
+                            "NULL. In PostgreSQL, adding the column with its non-NULL default in "
+                            "one statement would make existing rows read that default, so add the "
+                            "nullable column without a default before setting the default for "
+                            "future inserts."
+                        ),
                     ),
-                    acceptance_criteria=(
-                        "After migration, the seeded pre-existing row must read an expires_at "
-                        "value approximately 30 days after migration time."
+                    DecisionOption(
+                        id=EXPIRE_EXISTING,
+                        behavior=(
+                            "Existing item-sharing links receive an expiration approximately 30 "
+                            "days from migration."
+                        ),
+                        acceptance_criteria=(
+                            "After migration, the seeded pre-existing row must read an expires_at "
+                            "value approximately 30 days after migration time."
+                        ),
                     ),
                 ),
             ),
@@ -84,28 +97,64 @@ def scenario_registry(
             "files.\n"
             "Return the complete Python module as the structured artifact."
         ),
-        decision=DecisionSpec(
-            id="workspace_export_administrator_access",
-            question="Should workspace administrators be allowed to create exports?",
-            reason=(
-                "The gate could not establish from the brief whether administrators may create "
-                "workspace exports."
-            ),
-            options=(
-                DecisionOption(
-                    id=OWNER_ONLY,
-                    behavior="Administrators create no export job and receive 403.",
-                    acceptance_criteria=(
-                        "create_export must return 202 and append one job for owner; it must "
-                        "return 403 and append no job for administrator or member."
+        decisions=(
+            DecisionSpec(
+                id=ADMINISTRATOR_ACCESS,
+                question="Should workspace administrators be allowed to create exports?",
+                reason=(
+                    "The gate could not establish from the brief whether administrators may "
+                    "create workspace exports."
+                ),
+                options=(
+                    DecisionOption(
+                        id=OWNER_ONLY,
+                        behavior="Administrators create no export job and receive 403.",
+                        acceptance_criteria=(
+                            "create_export must return 202 and append one job for the first owner "
+                            "request; it must return 403 and append no job for administrator or "
+                            "member."
+                        ),
+                    ),
+                    DecisionOption(
+                        id=OWNER_AND_ADMIN,
+                        behavior="Administrators create one export job and receive 202.",
+                        acceptance_criteria=(
+                            "create_export must return 202 and append one job for the first owner "
+                            "request or an administrator; it must return 403 and append no job "
+                            "for a member."
+                        ),
                     ),
                 ),
-                DecisionOption(
-                    id=OWNER_AND_ADMIN,
-                    behavior="Administrators create one export job and receive 202.",
-                    acceptance_criteria=(
-                        "create_export must return 202 and append one job for owner or "
-                        "administrator; it must return 403 and append no job for member."
+            ),
+            DecisionSpec(
+                id=REPEAT_REQUEST,
+                question=(
+                    "What should happen when an owner requests an export while one already exists?"
+                ),
+                reason=(
+                    "The gate could not establish from the brief whether a repeated owner request "
+                    "should create another export job."
+                ),
+                options=(
+                    DecisionOption(
+                        id=CREATE_ANOTHER_EXPORT,
+                        behavior="A repeated owner request creates another export job.",
+                        acceptance_criteria=(
+                            "Two consecutive owner calls sharing one initially empty export_jobs "
+                            "list must both return 202 and append one job, leaving two jobs."
+                        ),
+                    ),
+                    DecisionOption(
+                        id=REUSE_ACTIVE_EXPORT,
+                        behavior=(
+                            "A repeated owner request receives 202 without creating another "
+                            "export job."
+                        ),
+                        acceptance_criteria=(
+                            "Two consecutive owner calls sharing one initially empty export_jobs "
+                            "list must both return 202; the first appends one job and the second "
+                            "appends none, leaving one job."
+                        ),
                     ),
                 ),
             ),

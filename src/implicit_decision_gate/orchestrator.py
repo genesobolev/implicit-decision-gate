@@ -15,6 +15,7 @@ from implicit_decision_gate.agent import (
 from implicit_decision_gate.gate import (
     AttemptRecord,
     DecisionRecord,
+    EvidenceClassification,
     GateError,
     ModelRole,
     RunRecord,
@@ -22,11 +23,17 @@ from implicit_decision_gate.gate import (
     RunStore,
     answer_owner,
     render_show,
-    state_after_review,
+    state_after_reviews,
     utc_now,
     validate_reviewer_result,
 )
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME, Scenario, option_by_id
+from implicit_decision_gate.scenario import (
+    UNMODELED_OUTCOME,
+    DecisionOption,
+    DecisionSpec,
+    Scenario,
+    option_by_id,
+)
 from implicit_decision_gate.scenarios import SHARE_LINK_EXPIRATION
 from implicit_decision_gate.worktree import WorktreeManager
 
@@ -67,12 +74,17 @@ class Orchestrator:
         self.store.create(run)
         return self._execute_or_fail(run, attempt_number=1)
 
-    def answer(self, run_id: str, option: str) -> RunRecord:
-        """Persist the one typed owner answer without invoking a model."""
+    def answer(self, run_id: str, decision_id: str, option: str) -> RunRecord:
+        """Persist one typed owner answer without invoking a model."""
 
         with self.store.lock(run_id):
             run = self.store.load(run_id)
-            answer_owner(run, option, self._scenario(run.scenario_id).decision)
+            answer_owner(
+                run,
+                decision_id,
+                option,
+                self._scenario(run.scenario_id).decisions,
+            )
             self.store.save(run)
             return run
 
@@ -89,7 +101,7 @@ class Orchestrator:
         """Render the persisted run summary without model execution."""
 
         run = self.store.load(run_id)
-        return render_show(run, self._scenario(run.scenario_id).decision)
+        return render_show(run, self._scenario(run.scenario_id).decisions)
 
     def _execute_or_fail(self, run: RunRecord, *, attempt_number: int) -> RunRecord:
         try:
@@ -127,13 +139,17 @@ class Orchestrator:
         except FileNotFoundError as error:
             raise GateError(f"Scenario context does not exist: {context_path}") from error
 
-        selected = run.decision.selected if run.decision is not None else None
+        selected = {
+            decision.decision_id: decision.selected
+            for decision in run.decisions
+            if decision.selected is not None
+        }
         coding_prompt = build_coding_prompt(
             scenario=scenario,
             brief=run.original_brief,
             context=context,
             attempt_number=attempt_number,
-            owner_option=selected if attempt_number == 2 else None,
+            owner_options=selected if attempt_number == 2 else None,
         )
         attempt.coding_prompt = coding_prompt
         self.store.save(run)
@@ -169,63 +185,101 @@ class Orchestrator:
         if attempt_number == 1:
             self._finish_first_attempt(run, scenario)
         else:
-            self._finish_second_attempt(run)
+            self._finish_second_attempt(run, scenario)
         self.store.save(run)
 
     def _finish_first_attempt(self, run: RunRecord, scenario: Scenario) -> None:
         observation = run.attempts[0].observation
         if observation is None:
             raise GateError("Attempt one has no observation")
-        option = option_by_id(scenario.decision, observation.outcome)
-        if observation.outcome == UNMODELED_OUTCOME or option is None:
+        expected_ids = {decision.id for decision in scenario.decisions}
+        if set(observation.outcomes) != expected_ids:
             run.state = RunState.FAILED
-            run.error = f"Attempt one produced an unmodeled outcome: {observation.outcome}"
+            run.error = "Attempt one did not return exactly the declared decision outcomes"
             return
 
-        reviewer_prompt = build_reviewer_prompt(
-            brief=run.original_brief,
-            option=option,
-        )
-        run.reviewer_prompt = reviewer_prompt
-        self.store.save(run)
+        modeled: list[tuple[DecisionSpec, DecisionOption]] = []
+        for decision in scenario.decisions:
+            outcome = observation.outcomes[decision.id]
+            option = option_by_id(decision, outcome)
+            if outcome == UNMODELED_OUTCOME or option is None:
+                run.state = RunState.FAILED
+                run.error = (
+                    f"Attempt one produced an unmodeled outcome for {decision.id}: {outcome}"
+                )
+                return
+            modeled.append((decision, option))
+
+        classifications = []
         reviewer_client = self._reviewer_client()
-        run.model_invocations.append(
-            reviewer_client.invocation_record(
+        for decision, option in modeled:
+            reviewer_prompt = build_reviewer_prompt(
+                brief=run.original_brief,
+                option=option,
+            )
+            record = DecisionRecord(
+                decision_id=decision.id,
+                observed=option.id,
+                reviewer_prompt=reviewer_prompt,
+            )
+            run.decisions.append(record)
+            self.store.save(run)
+            invocation = reviewer_client.invocation_record(
                 role=ModelRole.EVIDENCE_REVIEWER,
                 attempt_number=None,
             )
-        )
-        self.store.save(run)
-        run.reviewer_result = validate_reviewer_result(
-            run.original_brief,
-            reviewer_client.review_evidence(reviewer_prompt),
-        )
-        run.state = state_after_review(run.reviewer_result.classification)
-        run.decision = DecisionRecord(
-            decision_id=scenario.decision.id,
-            observed=observation.outcome,
-        )
-        if run.state is RunState.FAILED:
-            run.error = (
-                f"Observed behavior was {run.reviewer_result.classification.value} by the brief"
+            invocation.decision_id = decision.id
+            run.model_invocations.append(invocation)
+            self.store.save(run)
+            record.reviewer_result = validate_reviewer_result(
+                run.original_brief,
+                reviewer_client.review_evidence(reviewer_prompt),
             )
+            classifications.append(record.reviewer_result.classification)
+            self.store.save(run)
+
+        run.state = state_after_reviews(classifications)
+        if run.state is RunState.FAILED:
+            contradicted = [
+                decision.decision_id
+                for decision in run.decisions
+                if decision.reviewer_result is not None
+                and decision.reviewer_result.classification is EvidenceClassification.CONTRADICTED
+            ]
+            run.error = f"Observed behavior was contradicted for: {', '.join(contradicted)}"
 
     @staticmethod
-    def _finish_second_attempt(run: RunRecord) -> None:
-        if run.decision is None or run.decision.selected is None:
-            raise GateError("Attempt two has no owner decision")
+    def _finish_second_attempt(run: RunRecord, scenario: Scenario) -> None:
         observation = run.attempts[1].observation
         if observation is None:
             raise GateError("Attempt two has no observation")
-        if observation.outcome == run.decision.selected:
+        expected: dict[str, str] = {}
+        records = {decision.decision_id: decision for decision in run.decisions}
+        for specification in scenario.decisions:
+            record = records.get(specification.id)
+            if record is None or record.reviewer_result is None:
+                raise GateError(f"Attempt two has no reviewed decision: {specification.id}")
+            if record.selected is not None:
+                expected[specification.id] = record.selected
+            elif record.reviewer_result.classification is EvidenceClassification.SUPPORTED:
+                expected[specification.id] = record.observed
+            else:
+                raise GateError(f"Attempt two has no owner answer: {specification.id}")
+
+        mismatches = [
+            f"{decision_id}: expected {option}, observed "
+            f"{observation.outcomes.get(decision_id, 'MISSING')}"
+            for decision_id, option in expected.items()
+            if observation.outcomes.get(decision_id) != option
+        ]
+        extra = sorted(set(observation.outcomes) - set(expected))
+        mismatches.extend(f"{decision_id}: unexpected outcome" for decision_id in extra)
+        if not mismatches:
             run.state = RunState.COMPLETED
             run.error = None
         else:
             run.state = RunState.FAILED
-            run.error = (
-                f"Attempt two produced {observation.outcome}; "
-                f"owner selected {run.decision.selected}"
-            )
+            run.error = f"Attempt two decision mismatch: {'; '.join(mismatches)}"
 
     @staticmethod
     def _write_worktree_artifact(
