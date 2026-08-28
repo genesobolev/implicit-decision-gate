@@ -1,0 +1,167 @@
+"""Small deterministic adversarial matrix for the shared gate."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+
+from implicit_decision_gate.api_probe import (
+    ADMINISTRATOR_ACCESS,
+    CREATE_ANOTHER_EXPORT,
+    OWNER_AND_ADMIN,
+    OWNER_ONLY,
+    REPEAT_REQUEST,
+    REUSE_ACTIVE_EXPORT,
+)
+from implicit_decision_gate.gate import EvidenceClassification, ReviewerResult, RunState
+from implicit_decision_gate.orchestrator import Orchestrator
+from implicit_decision_gate.probe import (
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
+)
+from implicit_decision_gate.scenarios import (
+    SHARE_LINK_EXPIRATION,
+    WORKSPACE_EXPORT_AUTHORIZATION,
+)
+from tests.conftest import (
+    ScriptedCodingClient,
+    ScriptedReviewerClient,
+    ScriptMarkerProbe,
+    scripted_scenarios,
+)
+
+
+@dataclass(frozen=True)
+class EvaluationCase:
+    name: str
+    scenario: str
+    artifacts: tuple[str, ...]
+    selected: tuple[tuple[str, str], ...]
+    expected: RunState
+
+
+CASES = (
+    EvaluationCase(
+        "database converges",
+        SHARE_LINK_EXPIRATION,
+        (f"-- {EXPIRE_EXISTING}", f"-- {PRESERVE_EXISTING}"),
+        ((EXISTING_LINK_ROLLOUT, PRESERVE_EXISTING),),
+        RunState.COMPLETED,
+    ),
+    EvaluationCase(
+        "database ignores decision",
+        SHARE_LINK_EXPIRATION,
+        (f"-- {EXPIRE_EXISTING}", f"-- {EXPIRE_EXISTING}"),
+        ((EXISTING_LINK_ROLLOUT, PRESERVE_EXISTING),),
+        RunState.FAILED,
+    ),
+    EvaluationCase(
+        "database unmodeled outcome",
+        SHARE_LINK_EXPIRATION,
+        ("-- OTHER",),
+        (),
+        RunState.COVERAGE_GAP,
+    ),
+    EvaluationCase(
+        "authorization converges",
+        WORKSPACE_EXPORT_AUTHORIZATION,
+        (
+            f"# {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}",
+            f"# {OWNER_ONLY} {REUSE_ACTIVE_EXPORT}",
+        ),
+        (
+            (ADMINISTRATOR_ACCESS, OWNER_ONLY),
+            (REPEAT_REQUEST, REUSE_ACTIVE_EXPORT),
+        ),
+        RunState.COMPLETED,
+    ),
+    EvaluationCase(
+        "authorization ignores decision",
+        WORKSPACE_EXPORT_AUTHORIZATION,
+        (
+            f"# {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}",
+            f"# {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}",
+        ),
+        (
+            (ADMINISTRATOR_ACCESS, OWNER_ONLY),
+            (REPEAT_REQUEST, REUSE_ACTIVE_EXPORT),
+        ),
+        RunState.FAILED,
+    ),
+    EvaluationCase(
+        "authorization ignores administrator decision",
+        WORKSPACE_EXPORT_AUTHORIZATION,
+        (
+            f"# {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}",
+            f"# {OWNER_AND_ADMIN} {REUSE_ACTIVE_EXPORT}",
+        ),
+        (
+            (ADMINISTRATOR_ACCESS, OWNER_ONLY),
+            (REPEAT_REQUEST, REUSE_ACTIVE_EXPORT),
+        ),
+        RunState.FAILED,
+    ),
+    EvaluationCase(
+        "authorization ignores repeat decision",
+        WORKSPACE_EXPORT_AUTHORIZATION,
+        (
+            f"# {OWNER_AND_ADMIN} {CREATE_ANOTHER_EXPORT}",
+            f"# {OWNER_ONLY} {CREATE_ANOTHER_EXPORT}",
+        ),
+        (
+            (ADMINISTRATOR_ACCESS, OWNER_ONLY),
+            (REPEAT_REQUEST, REUSE_ACTIVE_EXPORT),
+        ),
+        RunState.FAILED,
+    ),
+    EvaluationCase(
+        "authorization unmodeled outcome",
+        WORKSPACE_EXPORT_AUTHORIZATION,
+        ("# OTHER",),
+        (),
+        RunState.COVERAGE_GAP,
+    ),
+)
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
+def test_adversarial_gate_matrix(
+    reference_repo: Path,
+    tmp_path: Path,
+    case: EvaluationCase,
+) -> None:
+    observer = ScriptMarkerProbe()
+    coding = ScriptedCodingClient(case.artifacts)
+    scenarios = scripted_scenarios(observer)
+    orchestrator = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenarios,
+        coding_client=coding,
+        reviewer_client=ScriptedReviewerClient(
+            [
+                ReviewerResult(
+                    classification=EvidenceClassification.NOT_EVIDENCED,
+                    evidence_quote=None,
+                )
+                for _ in scenarios[case.scenario].decisions
+            ]
+        ),
+        worktree_root=tmp_path / case.name.replace(" ", "-"),
+    )
+
+    run = orchestrator.start(case.scenario)
+    if case.selected:
+        assert run.state is RunState.AWAITING_OWNER
+        for decision_id, option_id in case.selected:
+            run = orchestrator.answer(run.run_id, decision_id, option_id)
+        run = orchestrator.resume(run.run_id)
+        for decision_id, option_id in case.selected:
+            assert (
+                f"Authoritative owner decision for {decision_id}: {option_id}" in coding.prompts[1]
+            )
+
+    assert run.state is case.expected
+    assert len(run.attempts) == len(case.artifacts)

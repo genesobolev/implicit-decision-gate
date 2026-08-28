@@ -7,17 +7,23 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from implicit_decision_gate.gate import ProbeResult, RolloutOption
+from implicit_decision_gate.postgres_surface import (
+    CatalogSnapshot,
+    capture_catalog,
+    diff_catalogs,
+)
+from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
 
-EXPECTED_TABLE = "public.share_links"
-EXPECTED_COLUMN = "expires_at"
 EXPECTED_DATA_TYPE = "timestamp with time zone"
+EXISTING_LINK_ROLLOUT = "existing_item_sharing_link_rollout"
+PRESERVE_EXISTING = "PRESERVE_EXISTING"
+EXPIRE_EXISTING = "EXPIRE_EXISTING"
 COMPOSE_ADMIN_DSN = "postgresql://idg_admin:idg_admin@127.0.0.1:55432/postgres"
 APPROXIMATION_TOLERANCE = timedelta(seconds=10)
 TRANSACTION_CONTROL = re.compile(
@@ -28,13 +34,6 @@ TRANSACTION_CONTROL = re.compile(
 
 class ProbeError(RuntimeError):
     """Raised when a migration cannot be safely probed."""
-
-
-class MigrationProbe(Protocol):
-    """Probe interface used by the orchestrator."""
-
-    def probe(self, migration: str, baseline_schema: str) -> ProbeResult:
-        """Execute and normalize a migration."""
 
 
 @dataclass(frozen=True)
@@ -61,7 +60,7 @@ def _approximately_thirty_days_after(
     return abs(value - expected) <= APPROXIMATION_TOLERANCE
 
 
-def normalize_observation(observation: Observation) -> ProbeResult:
+def normalize_observation(observation: Observation) -> ObservationResult:
     """Map raw database facts to one of the two modeled behaviors."""
 
     existing_label = "missing"
@@ -94,19 +93,22 @@ def normalize_observation(observation: Observation) -> ProbeResult:
         and observation.column_default is not None
         and inserted_label == "approximately_now_plus_30_days"
     )
-    option = RolloutOption.UNMODELED
+    option = UNMODELED_OUTCOME
     if structure_matches and existing_label == "null":
-        option = RolloutOption.PRESERVE_EXISTING
+        option = PRESERVE_EXISTING
     elif structure_matches and existing_label == "approximately_migration_time_plus_30_days":
-        option = RolloutOption.EXPIRE_EXISTING
+        option = EXPIRE_EXISTING
 
-    return ProbeResult(
-        data_type=observation.data_type,
-        nullable=observation.nullable,
-        column_default=observation.column_default,
-        insert_without_value=inserted_label,
-        existing_row=existing_label,
-        rollout_option=option,
+    return ObservationResult(
+        outcomes={EXISTING_LINK_ROLLOUT: option},
+        facts={
+            "data_type": observation.data_type,
+            "nullable": observation.nullable,
+            "column_default": observation.column_default,
+            "insert_without_value": inserted_label,
+            "existing_row": existing_label,
+            "rollback_verified": False,
+        },
     )
 
 
@@ -116,10 +118,10 @@ class PostgresProbe:
     def __init__(self, admin_dsn: str) -> None:
         self.admin_dsn = admin_dsn
 
-    def probe(self, migration: str, baseline_schema: str) -> ProbeResult:
+    def observe(self, artifact: str, context: str) -> ObservationResult:
         """Execute a migration as a limited role and always discard its transaction."""
 
-        if TRANSACTION_CONTROL.search(migration):
+        if TRANSACTION_CONTROL.search(artifact):
             raise ProbeError("Migration SQL must not contain transaction-control statements")
         suffix = uuid.uuid4().hex[:12]
         database_name = f"idg_probe_{suffix}"
@@ -128,7 +130,7 @@ class PostgresProbe:
         self._create_database(database_name, role_name, password)
         try:
             user_dsn = self._user_dsn(database_name, role_name, password)
-            result = self._execute(user_dsn, migration, baseline_schema)
+            result = self._execute(user_dsn, artifact, context)
         finally:
             self._drop_database(database_name, role_name)
         return result
@@ -185,23 +187,27 @@ class PostgresProbe:
         user_dsn: str,
         migration: str,
         baseline_schema: str,
-    ) -> ProbeResult:
+    ) -> ObservationResult:
         try:
             with psycopg.connect(user_dsn, autocommit=True) as connection:
                 connection.execute(baseline_schema)
                 connection.execute("BEGIN")
                 try:
+                    baseline_snapshot = capture_catalog(connection)
                     migration_time_row = connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()
                     if migration_time_row is None:
                         raise ProbeError("PostgreSQL did not return the migration time")
                     migration_time = cast(datetime, migration_time_row[0])
                     connection.execute(migration)
+                    migrated_snapshot = capture_catalog(connection)
                     observation = self._observe(connection, migration_time)
                     result = normalize_observation(observation)
+                    result.effects = diff_catalogs(baseline_snapshot, migrated_snapshot)
                 finally:
                     connection.execute("ROLLBACK")
-                result.rollback_verified = self._rollback_verified(connection)
-                if not result.rollback_verified:
+                rollback_verified = self._rollback_verified(connection, baseline_snapshot)
+                result.facts["rollback_verified"] = rollback_verified
+                if not rollback_verified:
                     raise ProbeError("Migration transaction rollback could not be verified")
                 return result
         except ProbeError:
@@ -269,10 +275,9 @@ class PostgresProbe:
             migration_time=migration_time,
         )
 
-    def _rollback_verified(self, connection: psycopg.Connection[tuple[Any, ...]]) -> bool:
-        row = connection.execute(
-            "SELECT count(*) FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = 'share_links' "
-            "AND column_name = 'expires_at'"
-        ).fetchone()
-        return row is not None and row[0] == 0
+    def _rollback_verified(
+        self,
+        connection: psycopg.Connection[tuple[Any, ...]],
+        baseline_snapshot: CatalogSnapshot,
+    ) -> bool:
+        return capture_catalog(connection) == baseline_snapshot

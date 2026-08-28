@@ -7,9 +7,11 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 
-from implicit_decision_gate.gate import RolloutOption
 from implicit_decision_gate.probe import (
     COMPOSE_ADMIN_DSN,
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
     Observation,
     PostgresProbe,
     normalize_observation,
@@ -43,13 +45,13 @@ def postgres_available() -> bool:
 @pytest.mark.parametrize(
     ("existing_expiration", "expected"),
     [
-        (None, RolloutOption.PRESERVE_EXISTING),
-        (datetime(2026, 2, 1, tzinfo=UTC), RolloutOption.EXPIRE_EXISTING),
+        (None, PRESERVE_EXISTING),
+        (datetime(2026, 2, 1, tzinfo=UTC), EXPIRE_EXISTING),
     ],
 )
 def test_normalize_maps_both_reference_behaviors(
     existing_expiration: datetime | None,
-    expected: RolloutOption,
+    expected: str,
 ) -> None:
     migration_time = datetime(2026, 1, 2, tzinfo=UTC)
     if existing_expiration is not None:
@@ -66,22 +68,30 @@ def test_normalize_maps_both_reference_behaviors(
             migration_time=migration_time,
         )
     )
-    assert result.rollout_option is expected
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
 
 
 @pytest.mark.skipif(not postgres_available(), reason="PostgreSQL 17 probe container is not running")
 @pytest.mark.parametrize(
     ("migration", "expected"),
     [
-        (PRESERVE_MIGRATION, RolloutOption.PRESERVE_EXISTING),
-        (EXPIRE_MIGRATION, RolloutOption.EXPIRE_EXISTING),
+        (PRESERVE_MIGRATION, PRESERVE_EXISTING),
+        (EXPIRE_MIGRATION, EXPIRE_EXISTING),
     ],
 )
 def test_postgres_probe_maps_reference_migrations(
     migration: str,
-    expected: RolloutOption,
+    expected: str,
 ) -> None:
-    result = PostgresProbe(COMPOSE_ADMIN_DSN).probe(migration, SCHEMA)
-    assert result.rollout_option is expected
-    assert result.rollback_verified is True
-    assert result.insert_without_value == "approximately_now_plus_30_days"
+    result = PostgresProbe(COMPOSE_ADMIN_DSN).observe(migration, SCHEMA)
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
+    assert result.facts["rollback_verified"] is True
+    assert result.facts["insert_without_value"] == "approximately_now_plus_30_days"
+    assert {
+        (effect.rule_id, effect.change, effect.identity, effect.attribute)
+        for effect in result.effects
+    } == {
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "data_type"),
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "default"),
+        ("schema_shape", "ADDED", "public.share_links.expires_at", "nullable"),
+    }

@@ -1,29 +1,34 @@
 flowchart TD
-    probe[Normalized PostgreSQL probe result]
-    modeled{Modeled rollout option}
-    unmodeled[FAILED]
-    review[Evidence reviewer classification]
-    reviewResult{Evidence classification}
-    completeFirst[COMPLETED]
-    conflict[FAILED]
-    pause[AWAITING_OWNER]
-    answer[Owner selects typed option]
+    observed[Observer returns normalized outcomes]
+    covered{Every outcome matches approved coverage}
+    coverageGap[COVERAGE_GAP event]
+    platform[Later platform engineering review]
+    review[Review each outcome against the brief]
+    result{Aggregate review result}
+    pause[One AWAITING_OWNER pause]
+    answered{All requested decisions answered}
     ready[READY_TO_RESUME]
-    retry[Fresh coding attempt and PostgreSQL probe]
-    equal{Observed option equals selected option}
+    retry[One fresh coding attempt]
+    observeAgain[Observer checks regenerated artifact]
+    verify{Every expected outcome matches}
+    completeFirst[COMPLETED]
+    failedReview[FAILED]
     completeSecond[COMPLETED]
-    mismatch[FAILED]
+    failedRetry[FAILED]
 
-    probe --> modeled
-    modeled -->|UNMODELED| unmodeled
-    modeled -->|PRESERVE_EXISTING or EXPIRE_EXISTING| review
-    review --> reviewResult
-    reviewResult -->|SUPPORTED| completeFirst
-    reviewResult -->|CONTRADICTED| conflict
-    reviewResult -->|NOT_EVIDENCED or UNCERTAIN| pause
-    pause --> answer
-    answer --> ready
+    observed --> covered
+    covered -->|No| coverageGap
+    coverageGap -.-> platform
+    covered -->|Yes| review
+    review --> result
+    result -->|Contradicted| failedReview
+    result -->|All supported| completeFirst
+    result -->|Answers required| pause
+    pause --> answered
+    answered -->|No| pause
+    answered -->|Yes| ready
     ready --> retry
-    retry --> equal
-    equal -->|Yes| completeSecond
-    equal -->|No| mismatch
+    retry --> observeAgain
+    observeAgain --> verify
+    verify -->|Yes| completeSecond
+    verify -->|No| failedRetry

@@ -9,18 +9,34 @@ from pathlib import Path
 import pytest
 
 from implicit_decision_gate.agent import build_coding_prompt
+from implicit_decision_gate.api_probe import DockerAuthorizationProbe
 from implicit_decision_gate.codex_client import (
     CODEX_MODEL,
     CODEX_REASONING_EFFORT,
     CodexCLIModelClient,
 )
-from implicit_decision_gate.gate import RolloutOption, RunState
+from implicit_decision_gate.gate import RunState
 from implicit_decision_gate.orchestrator import Orchestrator
-from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN, PostgresProbe
+from implicit_decision_gate.probe import (
+    COMPOSE_ADMIN_DSN,
+    EXISTING_LINK_ROLLOUT,
+    EXPIRE_EXISTING,
+    PRESERVE_EXISTING,
+    PostgresProbe,
+)
+from implicit_decision_gate.scenarios import (
+    SHARE_LINK_EXPIRATION,
+    scenario_registry,
+)
 from tests.conftest import BRIEF, SCHEMA
 from tests.test_probe import postgres_available
 
 LIVE_ENABLED = os.environ.get("IDG_LIVE_CODEX") == "1" and shutil.which("codex") is not None
+LIVE_SCENARIOS = scenario_registry(
+    PostgresProbe(COMPOSE_ADMIN_DSN),
+    DockerAuthorizationProbe(),
+)
+SHARE_LINK_SCENARIO = LIVE_SCENARIOS[SHARE_LINK_EXPIRATION]
 
 
 @pytest.mark.skipif(
@@ -29,16 +45,17 @@ LIVE_ENABLED = os.environ.get("IDG_LIVE_CODEX") == "1" and shutil.which("codex")
 )
 def test_live_model_honors_preserve_owner_decision() -> None:
     prompt = build_coding_prompt(
+        scenario=SHARE_LINK_SCENARIO,
         brief=BRIEF,
-        schema=SCHEMA,
+        context=SCHEMA,
         attempt_number=2,
-        owner_option=RolloutOption.PRESERVE_EXISTING,
+        owner_options={EXISTING_LINK_ROLLOUT: PRESERVE_EXISTING},
     )
 
-    migration = CodexCLIModelClient().propose_migration(prompt)
-    result = PostgresProbe(COMPOSE_ADMIN_DSN).probe(migration, SCHEMA)
+    artifact = CodexCLIModelClient().propose_artifact(prompt)
+    result = PostgresProbe(COMPOSE_ADMIN_DSN).observe(artifact, SCHEMA)
 
-    assert result.rollout_option is RolloutOption.PRESERVE_EXISTING
+    assert result.outcomes == {EXISTING_LINK_ROLLOUT: PRESERVE_EXISTING}
 
 
 @pytest.mark.skipif(
@@ -51,9 +68,9 @@ def test_live_model_can_pause_and_complete_second_attempt(
 ) -> None:
     first = Orchestrator(
         repo_path=reference_repo,
+        scenarios=LIVE_SCENARIOS,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
-        probe=PostgresProbe(COMPOSE_ADMIN_DSN),
         worktree_root=tmp_path / "live-worktrees",
     ).start()
     assert first.state is RunState.AWAITING_OWNER
@@ -61,22 +78,22 @@ def test_live_model_can_pause_and_complete_second_attempt(
     assert all(
         record.reasoning_effort == CODEX_REASONING_EFFORT for record in first.model_invocations
     )
-    assert first.attempts[0].probe_result is not None
-    observed = first.attempts[0].probe_result.rollout_option
-    selected = (
-        RolloutOption.EXPIRE_EXISTING
-        if observed is RolloutOption.PRESERVE_EXISTING
-        else RolloutOption.PRESERVE_EXISTING
+    assert first.attempts[0].observation is not None
+    observed = first.attempts[0].observation.outcomes[EXISTING_LINK_ROLLOUT]
+    selected = EXPIRE_EXISTING if observed == PRESERVE_EXISTING else PRESERVE_EXISTING
+    Orchestrator(repo_path=reference_repo, scenarios=LIVE_SCENARIOS).answer(
+        first.run_id,
+        EXISTING_LINK_ROLLOUT,
+        selected,
     )
-    Orchestrator(repo_path=reference_repo).answer(first.run_id, selected)
     completed = Orchestrator(
         repo_path=reference_repo,
+        scenarios=LIVE_SCENARIOS,
         coding_client=CodexCLIModelClient(),
         reviewer_client=CodexCLIModelClient(),
-        probe=PostgresProbe(COMPOSE_ADMIN_DSN),
         worktree_root=tmp_path / "live-worktrees",
     ).resume(first.run_id)
     assert completed.state is RunState.COMPLETED
-    assert completed.attempts[1].probe_result is not None
-    assert completed.attempts[1].probe_result.rollout_option is selected
+    assert completed.attempts[1].observation is not None
+    assert completed.attempts[1].observation.outcomes[EXISTING_LINK_ROLLOUT] == selected
     assert len(completed.model_invocations) == 3

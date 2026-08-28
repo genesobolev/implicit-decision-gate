@@ -1,159 +1,219 @@
 # Implicit Decision Gate
 
-Implicit Decision Gate is a deliberately small, fictional contract-completion stage
-inside the trust architecture described in 1Password's
-[Verified Loops](https://1password.com/blog/verified-loops-building-ai-agent-trust).
-That architecture makes the human-owned job definition the verification boundary and
-leaves humans the consequential judgments that cannot be verified mechanically. This
-demo makes one such boundary executable: what happens when a system-observed effect
-reveals that the request never made a required choice?
+Implicit Decision Gate is a small proof of concept for completing missing intent in
+agent-generated work. It applies one part of the trust architecture described in
+1Password's
+[Verified Loops](https://1password.com/blog/verified-loops-building-ai-agent-trust):
+when runtime evidence reveals an important choice that the original request didn't make,
+the system pauses for a human answer and verifies a fresh result against that answer.
 
-## Motivation
+The important signal comes from observed system effects, not the coding agent's
+description of its own work.
 
-Long-running AI work can quietly make important choices that the original request never
-made. A request to add an export feature might not say who may export, how long exported
-files should be kept, or whether each export must be recorded. The code must still choose
-a behavior, and that choice can be hard to notice inside a large change.
+## What it demonstrates
 
-The larger idea behind this project is one shared gate for these missing decisions.
-Separate checks for important parts of a system report simple facts about what the agent
-actually changed. A database check can report what happens to existing data, a permission
-check can report who gained access, a storage check can report how long data is kept, and
-an API check can report behavior visible to other software. If a reported fact matters
-and the request contains no approved answer for it, the gate saves the work and asks a
-person.
+- One observer can report multiple independent decisions from one generated artifact.
+- A separate evidence review can compare each observed behavior with the original brief.
+- The gate can collect all required human answers in one durable pause.
+- One fresh coding attempt can be verified against the complete decision set.
+- An unmodeled observation can be recorded for later platform review without becoming a
+    product decision or execution error.
+- Different observers can reuse the same save, review, answer, retry, and verification
+    lifecycle.
 
-This scales by building each kind of check once and reusing it across many jobs. The
-shared gate handles saving, asking, resuming, and checking the next result for all of
-them. It does not promise to find every possible hidden choice. It covers important parts
-of a system where effects can be observed reliably.
+## Primary example
 
-This repository implements one complete example of that wider design. PostgreSQL reports
-whether the proposed change preserves existing links or makes them expire. The database
-check is the only kind implemented here.
+The workspace-export brief defines two requirements and leaves two decisions open:
 
-## The fictional 1Password scenario
+| Brief specifies | Brief doesn't specify |
+| --- | --- |
+| The first owner request creates an export | Whether administrators can create exports |
+| Members are denied | What a repeated owner request should do |
 
-Imagine a service behind 1Password item-sharing links. A brief asks a coding agent to
-make newly created links expire after 30 days. The fictional service stores link records
-in a PostgreSQL table named `public.share_links`.
+A generated Python handler must still choose both unspecified behaviors. A disposable,
+network-disabled container calls the handler twice as an owner with shared state, then
+once each as an administrator and member. It reports two independent outcomes:
 
-The brief does not say what should happen to links customers already created. A valid
-PostgreSQL migration must nevertheless choose between two materially different outcomes:
+| Decision | Supported options |
+| --- | --- |
+| Administrator access | `OWNER_ONLY` or `OWNER_AND_ADMIN` |
+| Repeated owner request | `CREATE_ANOTHER_EXPORT` or `REUSE_ACTIVE_EXPORT` |
 
-| Decision | Existing links | New links |
-| --- | --- | --- |
-| `PRESERVE_EXISTING` | Keep their current non-expiring behavior | Expire after 30 days |
-| `EXPIRE_EXISTING` | Expire 30 days after migration | Expire after 30 days |
+If the brief doesn't support the observed choices, the gate presents both questions in
+one `AWAITING_OWNER` pause. The owner records one answer for each question. The gate then
+starts one fresh coding attempt and verifies both regenerated outcomes.
 
-Either policy could be legitimate. The agent should not silently invent it. Expiring old
-links can break customer workflows; preserving them can retain access longer than the new
-policy intends.
+This and the share-link example are fictional. They make no claim about 1Password's
+production services, database schema, or authorization model.
 
-This scenario is fictional. It makes no claim about 1Password's production services,
-database schema, or implementation of item sharing. In `public.share_links`, `public` is
-only the standard PostgreSQL schema namespace. It does **not** mean the table, its rows,
-or the links are publicly accessible.
+## How the gate works
 
-## Where the demo fits in a verified loop
+![Lifecycle showing the coverage-gap stop or, for covered outcomes, two human answers, one fresh retry, and final verification.](notebooks/assets/diagrams/lifecycle.png)
 
-1. The application pins the brief and schema to one Git commit and creates a clean,
-   detached worktree. Codex receives those exact inputs in an isolated
-   non-repository process, and the application writes its proposed migration into the
-   worktree.
-2. A disposable PostgreSQL 17 database applies the migration and observes its effects on
-   both an old row and a newly inserted row.
-3. A separate evidence reviewer sees only the brief and the normalized observed behavior.
-4. Because the brief is silent about old rows, the run durably pauses in
-   `AWAITING_OWNER`.
-5. An owner records the smallest missing judgment: `PRESERVE_EXISTING` or
-   `EXPIRE_EXISTING`.
-6. The application creates another clean worktree at the original commit. A new isolated
-   coding invocation receives its brief, schema, and owner decision without being given
-   the checkout as its working root or receiving the first migration or reviewer rationale.
-7. PostgreSQL verifies the regenerated migration directly against that decision.
+[Review the Mermaid source.](notebooks/assets/diagrams/lifecycle.mmd)
 
-The important signal comes from system-observed effects, not the coding agent's
-description of its own work. The pause is durable, so model execution and human judgment
-can happen in different processes and at different times.
+1. Pin the authoritative brief and technical context to one Git commit.
+2. Ask a fresh coding process to generate one scenario artifact.
+3. Execute the artifact with a bounded observer and normalize its effects.
+4. If an effect is outside approved coverage, persist a structured `COVERAGE_GAP` event
+    for later platform review and stop the product workflow.
+5. Otherwise, review each typed outcome independently against the original brief.
+6. If any choices are unsupported, persist one pause and collect the required owner
+    answers.
+7. Start one clean coding attempt with the original inputs and all selected answers.
+8. Run the same observer and compare every expected outcome with the regenerated result.
 
-This repository does not implement the Verified Loops capabilities described by
-1Password. A real integration would still rely on 1Password to supply authenticated
-agent and human identity, a controlled tool gateway, trusted and attributable evidence,
-and capability or permission enforcement. This prototype assumes those controls and
-focuses only on detecting and completing missing intent.
+Contradictory evidence, an execution error, or a second-attempt mismatch ends the run in
+`FAILED`. An unmodeled first-attempt effect ends in `COVERAGE_GAP` without invoking the
+evidence reviewer, product owner, or second coding attempt.
 
-In that integration, the gate would sit after trusted runtime evidence exposes the
-undeclared choice and before any permission is earned. The authenticated owner decision
-would amend or refine the human-owned job contract; the clean second attempt would then
-return to the existing verifier. This demo never grants a capability itself.
-
-## Run the demo
+## Run the primary demo
 
 Requirements:
 
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
 - An installed and authenticated [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode)
-- Docker with Compose, which supplies the PostgreSQL 17 verifier
-- [`jq`](https://jqlang.github.io/jq/) only for the optional manual inspection commands
+- Docker
+- [`jq`](https://jqlang.github.io/jq/) only for optional manual inspection
 
 From the repository root:
 
 ```bash
 uv sync --extra dev
 codex --version
+uv run idg start --scenario workspace-export-authorization
+```
+
+`start` returns a `run_id`, the two observed options, their evidence classifications,
+and the required `decision_requests`. Choose one option for each request. For example:
+
+```bash
+uv run idg answer RUN_ID \
+    --decision workspace_export_administrator_access \
+    --option OWNER_ONLY
+
+uv run idg answer RUN_ID \
+    --decision workspace_export_repeat_request \
+    --option REUSE_ACTIVE_EXPORT
+```
+
+Each `answer` command records exactly one typed decision and doesn't invoke a model. The
+run remains in `AWAITING_OWNER` until every required answer exists. The final answer moves
+the run to `READY_TO_RESUME`.
+
+Start and verify one fresh attempt:
+
+```bash
+uv run idg resume RUN_ID
+```
+
+A successful run ends in `COMPLETED` only when both observed outcomes match the completed
+decision set.
+
+The project pins each coding and evidence-review invocation to
+[`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) with
+`xhigh` reasoning and records the invocation role, attempt number, decision identifier,
+model, reasoning effort, and Codex CLI version.
+
+## Supported observers
+
+### Workspace export behavior
+
+The workspace-export observer runs one generated Python module in a disposable,
+network-disabled, read-only container. It measures returned status codes and changes to
+the supplied export-job list.
+
+The first owner request must return 202 and create one job. A member request must return
+403 and create no job. The independent open decisions are:
+
+- Whether an administrator receives 403 with no job or 202 with one job.
+- Whether the second owner request creates another job or succeeds without creating an
+    additional job.
+
+Any unsupported combination is `UNMODELED`. The gate records its normalized facts and
+artifact digest as a coverage event, returns `COVERAGE_GAP`, and stops before evidence
+review.
+
+### PostgreSQL share-link behavior
+
+The default scenario asks Codex to add 30-day expiration to newly created item-sharing
+links. The brief doesn't say what should happen to existing links. A PostgreSQL probe
+distinguishes two supported outcomes:
+
+| Option | Existing links | New links |
+| --- | --- | --- |
+| `PRESERVE_EXISTING` | Remain non-expiring | Expire after 30 days |
+| `EXPIRE_EXISTING` | Receive an expiration | Expire after 30 days |
+
+Run it with the disposable PostgreSQL 17 service:
+
+```bash
 docker compose up -d --wait
 uv run idg start
 ```
 
-`start` invokes the locally authenticated Codex CLI. Copy the returned `run_id`; the
-reference run stops in `AWAITING_OWNER` after its first migration chooses one of the two
-policies the brief left open. Its `decision_request` shows why the run paused, the
-behavior PostgreSQL observed, both supported policies and their resulting database
-behavior, and a complete `idg answer` command for each choice. The application defines
-these verifiable choices; Codex does not select the missing policy.
+The behavioral probe seeds an existing row, applies the generated migration, inserts a
+new row, records normalized facts, and rolls the transaction back. This establishes the
+effect of the migration without inferring behavior from SQL text.
 
-The application pins every coding and evidence-review invocation to
-[`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra) with
-`xhigh` reasoning. It passes both settings explicitly while ignoring user configuration,
-and records the model, reasoning effort, invocation role, attempt number, and Codex CLI
-version in `run.json`. The model slug is fixed by this repository; it is not a claim that
-the provider's underlying weights are an immutable dated snapshot.
+### PostgreSQL structural surface
 
-To make the contract amendment visible, select the policy opposite
-`decision_request.observed.option`, then resume the durable run:
+The PostgreSQL observer also compares catalog snapshots before and after each migration.
+Three reusable rules report sorted `ADDED`, `REMOVED`, and `CHANGED` structural effects:
 
-```bash
-# If Codex chose EXPIRE_EXISTING:
-uv run idg answer RUN_ID --option PRESERVE_EXISTING
+| Rule | Observed structure | Covered operations |
+| --- | --- | --- |
+| `schema_shape` | Tables and column type, nullability, and default | Create or drop tables and columns; change observed column properties |
+| `data_integrity` | Primary-key, unique, check, and foreign-key constraints | Add, remove, or replace observed constraints |
+| `indexing` | Standalone index definition and uniqueness | Add, remove, or replace indexes with transactional DDL |
 
-# If Codex chose PRESERVE_EXISTING:
-uv run idg answer RUN_ID --option EXPIRE_EXISTING
+Each effect records the rule, change, object kind, schema-qualified identity, attribute,
+and before and after values. This is a bounded view of final PostgreSQL structure in
+`public`. It doesn't report transient operations, row rewrites, locks, data loss, or
+performance. Those require targeted behavioral probes.
 
-uv run idg resume RUN_ID
-```
+## Trust boundary
 
-`answer` only records the selected option. It does not invoke Codex or interpret free
-text. `resume` deliberately remains separate so execution can occur later or in another
-process. `show` is optional and returns the same structured decision request while the
-run is paused:
+![System context showing the product workflow, durable gate, and separate platform review of persisted coverage events.](notebooks/assets/diagrams/system_context.png)
 
-```bash
-uv run idg show RUN_ID
-```
+[Review the Mermaid source.](notebooks/assets/diagrams/system_context.mmd)
 
-`resume` starts a fresh ephemeral Codex process automatically. The application reuses
-the Codex CLI's saved authentication; it does not ask for or read model API keys.
+| Component | Responsibility |
+| --- | --- |
+| Human brief | Defines authoritative intent |
+| Coding model | Proposes one artifact from the supplied inputs |
+| Observer | Reports bounded system effects |
+| Evidence reviewer | Checks whether the brief explicitly supports each effect |
+| Human owner | Supplies missing product decisions |
+| Gate | Persists state, controls transitions, and verifies regenerated outcomes |
 
-## Walk through every stage in Jupyter
+An unmodeled result isn't sent to the human owner. The run records the decision
+identifier, normalized facts and effects, attempt number, artifact digest, and pinned
+commit. A separate platform workflow can later aggregate these events and decide whether
+the observer's approved coverage should change through normal engineering review.
 
-The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) runs the same
-public CLI and opens each persisted stage in causal order: pinned inputs, exact
-project-controlled prompts, generated SQL, immutable digests, normalized PostgreSQL
-evidence, the evidence review, the typed owner decision, the clean retry, and the final
-deterministic check. Every section identifies the actor responsible for the action or
-evidence.
+The first and second coding attempts use separate processes and clean detached worktrees
+at the same original commit. Attempt two receives the original brief, technical context,
+and selected owner decisions. It doesn't receive attempt one's artifact, model response,
+or reviewer rationale.
+
+`run.json` persists the material prompts, model provenance, independent decision records,
+attempt observations, immutable artifact digests, and current run state. Raw model
+transcripts aren't retained.
+
+This repository doesn't implement the wider Verified Loops controls. A real integration
+would still rely on the surrounding system for authenticated human and agent identity,
+controlled tool access, attributable evidence, and permission enforcement.
+
+## Guided notebook
+
+The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) presents the
+workspace-export value path: two observed decisions, one durable pause, two human answers,
+one clean retry, and direct verification of both outcomes. If a live first attempt instead
+produces an unmodeled result, the notebook displays the persisted coverage event and skips
+the product-decision and retry cells without raising an execution error. It retains the
+system-context, lifecycle, and gate-logic diagrams while hiding low-level setup details.
 
 Launch it from the repository root:
 
@@ -162,132 +222,44 @@ uv run --with 'jupyterlab>=4.1,<5' jupyter lab \
     notebooks/implicit-decision-gate-walkthrough.ipynb
 ```
 
-JupyterLab remains demo tooling rather than a project dependency. Run the launch command
-once before presenting so `uv` can cache it. The notebook invokes the live Codex and
-PostgreSQL path, creates a new durable run, and makes the typed owner choice an explicit
-cell to review or edit before resuming. The checked-in outputs are one representative
-live run in which the owner selects the other supported policy. A new run may initially
-choose either supported rollout policy, and the owner may confirm it or select the other
-one.
+JupyterLab remains demo tooling rather than a project dependency. The notebook invokes
+the live Codex CLI and Docker observer and creates a new durable run.
 
-## Where the prompts come from
+## Inspect and validate
 
-There is one fixed scenario brief at
-[`examples/share-link-expiration/brief.md`](examples/share-link-expiration/brief.md) and
-one fictional baseline schema at
-[`examples/share-link-expiration/schema.sql`](examples/share-link-expiration/schema.sql).
-The project-controlled coding and evidence-review prompts are assembled in
-[`agent.py`](src/implicit_decision_gate/agent.py).
-
-The brief is the human-owned engineering ticket. The rendered coding prompt is an
-application-owned execution envelope, not an engineer's reinterpretation of that ticket.
-The first request combines isolation and structured-output instructions with the
-verbatim brief and baseline schema. The second is a new request containing the same
-inputs plus the selected owner option and its required behavior. It does not contain
-attempt one's SQL, model response, or review rationale. The reviewer receives only the
-verbatim brief and the behavior PostgreSQL observed.
-
-The brief is stored separately and embedded in each applicable prompt because every
-Codex process is ephemeral and needs its complete input. Persisting both also lets an
-auditor compare the source contract with the exact materialized prompt. Product
-requirements are not repeated in the prompt envelope; attempt two's additional behavior
-and acceptance criteria are the explicit owner amendment.
-
-Each Codex process runs from a fresh temporary directory instead of the repository. Its
-sandbox is read-only, user configuration is ignored, and the application is the only
-component that writes the returned migration into the pinned worktree. This avoids
-supplying checkout contents as normal model context; the trusted runtime in a production
-integration would enforce the stronger filesystem boundary.
-
-The exact project-controlled coding and reviewer prompts and normalized review results
-are persisted in `run.json`; returned migrations are stored as adjacent immutable SQL
-artifacts. Raw model transcripts are not retained. The run record is therefore the best
-place to inspect the material prompt rather than inferring it from a source template.
-
-## Inspect the state and artifacts manually
-
-Each run stores its current state, prompts, results, and immutable migration artifacts,
-as they become available, in:
-
-```text
-.idg/runs/RUN_ID/
-    run.json
-    attempt-1.sql
-    attempt-2.sql
-```
-
-`run.json` is an atomically replaced current-state snapshot, not an append-only event
-history. There is no separate graph database or hidden graph to inspect. The small state
-machine is represented by the current run record, its ordered attempt records, and the
-SQL artifacts.
-
-The reference path is `STARTED` → `AWAITING_OWNER` → `READY_TO_RESUME` → `COMPLETED`.
-An unmodeled effect, contradictory evidence, execution error, or second-attempt mismatch
-instead ends in `FAILED`.
-
-Inspect the complete record and the most useful attempt evidence:
+Show the compact state of a durable run:
 
 ```bash
-jq . .idg/runs/RUN_ID/run.json
-jq '.model_invocations' .idg/runs/RUN_ID/run.json
-jq '{state, decision, reviewer_result}' .idg/runs/RUN_ID/run.json
-jq -r '.attempts[].coding_prompt' .idg/runs/RUN_ID/run.json
-jq -r '.reviewer_prompt' .idg/runs/RUN_ID/run.json
-jq '.attempts[] | {number, worktree_path, migration_digest, probe_result}' \
-    .idg/runs/RUN_ID/run.json
+uv run idg show RUN_ID
 ```
 
-Compare what changed after the owner decision:
+Inspect the persisted decisions and observed outcomes:
 
 ```bash
-diff -u \
-    .idg/runs/RUN_ID/attempt-1.sql \
-    .idg/runs/RUN_ID/attempt-2.sql
+jq '{state, decisions}' .idg/runs/RUN_ID/run.json
+jq '.attempts[].observation.outcomes' .idg/runs/RUN_ID/run.json
 ```
 
-List the detached worktrees, copy either path, and inspect it with ordinary Git commands:
+The deterministic suite doesn't invoke Codex. Start PostgreSQL to include the database
+integration tests:
 
 ```bash
-jq -r '.attempts[].worktree_path' .idg/runs/RUN_ID/run.json
-git -C /PATH/FROM/THE/PREVIOUS/COMMAND status --short
-sed -n '1,200p' \
-    /PATH/FROM/THE/PREVIOUS/COMMAND/examples/share-link-expiration/migrations/idg-*.sql
-```
-
-In each attempt record, compare `probe_result.rollout_option` with
-`decision.selected`. The SQL files show the proposed mechanism; the probe result shows
-the effect that PostgreSQL actually produced.
-
-## Why PostgreSQL and Docker are involved
-
-PostgreSQL is the verifier in this example, not incidental demo infrastructure. The gate
-needs to observe real PostgreSQL DDL and default semantics: the column type and
-nullability, whether the seeded old row was backfilled, and what expiration a new row
-receives. Parsing SQL or running it against SQLite would not establish those effects.
-
-Docker Compose is the demo's only PostgreSQL runtime. It supplies a reproducible local
-PostgreSQL 17 instance with fixed demo credentials and no production data. The public CLI
-uses the loopback connection defined by `compose.yaml`; that connection string is internal
-plumbing, not a user-selectable database target. Each probe creates a fresh test database,
-executes through a limited role inside a transaction, records normalized observations,
-and rolls the transaction back. The container's data directory is temporary.
-
-When finished with the Compose instance:
-
-```bash
-docker compose down --volumes
-```
-
-## Validate the implementation
-
-The normal suite is deterministic and does not invoke Codex:
-
-```bash
+docker compose up -d --wait
 uv run pytest
+docker compose stop
 ```
 
-To opt into the live Codex integration test after starting the Compose service:
+Opt into the live Codex integration tests with:
 
 ```bash
 IDG_LIVE_CODEX=1 uv run pytest tests/test_live.py -v
 ```
+
+## Boundaries
+
+- The scenarios and outcome vocabularies are fixed by the application.
+- Each covered surface needs its own bounded observer.
+- The evidence reviewer doesn't provide arbitrary semantic understanding.
+- The prototype doesn't authenticate or attribute the local human caller.
+- The gate doesn't grant capabilities or enforce production permissions.
+- The run record is an atomically replaced snapshot, not an append-only event ledger.

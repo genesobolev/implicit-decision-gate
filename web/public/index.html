@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="An interactive explanation of the Implicit Decision Gate proof of concept.">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#145fe4">
+    <title>Implicit Decision Gate</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <div class="app-shell">
+        <header class="app-header">
+            <div class="app-identity">
+                <span class="brand-mark" aria-hidden="true">idg</span>
+                <div>
+                    <strong>Implicit Decision Gate</strong>
+                    <span>Interactive explainer</span>
+                </div>
+            </div>
+
+            <nav class="app-tabs" role="tablist" aria-label="Application views">
+                <button id="walkthrough-tab" type="button" role="tab" data-view="walkthrough" aria-selected="true" aria-controls="walkthrough-view">Walkthrough</button>
+                <button id="coverage-tab" type="button" role="tab" data-view="coverage" aria-selected="false" aria-controls="coverage-view">Observer coverage</button>
+            </nav>
+        </header>
+
+        <main class="app-main">
+            <section class="app-view" id="walkthrough-view" role="tabpanel" aria-labelledby="walkthrough-tab" data-view-panel="walkthrough">
+                <div class="view-header">
+                    <div>
+                        <p class="eyebrow">Guided replay</p>
+                        <h1>Walk through an implicit decision</h1>
+                        <p>Follow a deterministic example from observed behavior through human input and verification.</p>
+                    </div>
+                    <div class="scenario-tabs" role="tablist" aria-label="Walkthrough example">
+                        <button type="button" role="tab" data-scenario="api" aria-selected="true">API example</button>
+                        <button type="button" role="tab" data-scenario="database" aria-selected="false">Database example</button>
+                    </div>
+                </div>
+
+                <div class="demo-shell">
+                    <div class="demo-toolbar">
+                        <div>
+                            <span class="toolbar-label">Scenario</span>
+                            <strong id="scenario-name">Workspace export authorization</strong>
+                        </div>
+                        <button class="mode-toggle" id="coverage-gap-toggle" type="button" aria-pressed="false">
+                            <span class="toggle-track" aria-hidden="true"><span></span></span>
+                            Show unmodeled outcome
+                        </button>
+                    </div>
+
+                    <div class="stage-rail" id="stage-rail" aria-label="Run stages"></div>
+                    <div class="stage-content" id="stage-content" aria-live="polite"></div>
+                </div>
+            </section>
+
+            <section class="app-view" id="coverage-view" role="tabpanel" aria-labelledby="coverage-tab" data-view-panel="coverage" hidden>
+                <div class="view-header">
+                    <div>
+                        <p class="eyebrow">Observer coverage</p>
+                        <h1>Compare bounded system surfaces</h1>
+                        <p>See how different observers normalize system effects for the same gate lifecycle.</p>
+                    </div>
+                </div>
+
+                <div class="coverage-shell">
+                    <div class="surface-tabs" id="surface-tabs" role="tablist" aria-label="Observer surfaces">
+                        <button type="button" role="tab" data-surface="api" aria-selected="true">API behavior</button>
+                        <button type="button" role="tab" data-surface="database" aria-selected="false">Database behavior</button>
+                        <button type="button" role="tab" data-surface="structure" aria-selected="false">Database structure</button>
+                    </div>
+                    <div class="coverage-content" id="coverage-content"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <noscript>This interactive explanation requires JavaScript.</noscript>
+</body>
+</html>

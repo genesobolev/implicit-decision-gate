@@ -1,27 +1,26 @@
 flowchart LR
     owner[Human job owner]
-    git[Git pinned brief and schema]
-    orchestrator[Gate orchestrator]
+    git[Git pinned brief and context]
+    orchestrator[Implicit Decision Gate]
     coder[Fresh Codex coding process]
-    postgres[Disposable PostgreSQL verifier]
+    observer[Disposable behavior observer]
     reviewer[Fresh Codex evidence reviewer]
-    gate[Deterministic logic inside orchestrator]
     store[Durable run store]
+    platform[Later platform engineering review]
     verified[Return to wider verified loop]
     trust[Verified Loops trust controls]
 
     owner -->|Authoritative brief| git
     git -->|Pinned inputs| orchestrator
-    orchestrator -->|Rendered coding prompt| coder
-    coder -->|Structured migration SQL| orchestrator
-    orchestrator -->|Schema and migration| postgres
-    postgres -->|Normalized observations| orchestrator
-    orchestrator -->|Brief and observed behavior| reviewer
-    reviewer -->|Evidence classification| orchestrator
-    orchestrator -->|Evidence and typed facts| gate
-    gate -->|State transition| orchestrator
-    orchestrator -->|State prompts evidence artifacts| store
-    orchestrator -->|Missing judgment| owner
-    owner -->|Typed contract amendment| orchestrator
-    orchestrator -->|Verified contract completion| verified
-    trust -.->|Identity tools evidence and permissions| orchestrator
+    orchestrator -->|Coding prompt| coder
+    coder -->|Generated artifact| orchestrator
+    orchestrator -->|Artifact and context| observer
+    observer -->|Normalized observed outcomes| orchestrator
+    orchestrator -->|Covered outcomes and brief| reviewer
+    reviewer -->|Evidence classifications| orchestrator
+    orchestrator -->|Missing product decisions| owner
+    owner -->|Typed owner decisions| orchestrator
+    orchestrator -->|Persist run state and evidence| store
+    store -.->|Coverage events for later review| platform
+    orchestrator -->|Verified completion| verified
+    trust -.->|Identity tools evidence permissions| orchestrator

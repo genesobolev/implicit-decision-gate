@@ -25,8 +25,8 @@ CODEX_REASONING_EFFORT = "xhigh"
 
 CODING_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {"sql": {"type": "string"}},
-    "required": ["sql"],
+    "properties": {"artifact": {"type": "string"}},
+    "required": ["artifact"],
     "additionalProperties": False,
 }
 
@@ -87,17 +87,17 @@ class CodexCLIModelClient:
             codex_cli_version=version,
         )
 
-    def propose_migration(self, prompt: str) -> str:
-        """Return one structured SQL proposal from an isolated process."""
+    def propose_artifact(self, prompt: str) -> str:
+        """Return one structured artifact from an isolated process."""
 
         payload = self._execute(
             prompt,
             schema=CODING_SCHEMA,
         )
-        sql = payload.get("sql")
-        if not isinstance(sql, str) or not sql.strip():
-            raise AgentError("Codex CLI returned an empty migration")
-        return sql
+        artifact = payload.get("artifact")
+        if not isinstance(artifact, str) or not artifact.strip():
+            raise AgentError("Codex CLI returned an empty artifact")
+        return artifact
 
     def review_evidence(self, prompt: str) -> ReviewerResult:
         """Return one structured result from a fresh non-repository process."""
