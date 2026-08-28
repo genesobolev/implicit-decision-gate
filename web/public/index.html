@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="An interactive explanation of the Implicit Decision Gate proof of concept.">
+    <meta name="color-scheme" content="dark">
+    <title>Implicit Decision Gate</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="#overview" aria-label="Implicit Decision Gate home">
+            <span class="brand-mark" aria-hidden="true">IDG</span>
+            <span>Implicit Decision Gate</span>
+        </a>
+        <nav class="site-nav" aria-label="Primary navigation">
+            <a href="#walkthrough">Walkthrough</a>
+            <a href="#coverage">Coverage</a>
+            <a href="#code-map">Code map</a>
+        </nav>
+        <a class="button button-secondary button-compact" href="https://github.com/genesobolev/implicit-decision-gate/tree/9b71603bda6bb3b232a7c0da7df735e1939b34a5" target="_blank" rel="noreferrer">View source</a>
+    </header>
+
+    <main>
+        <section class="hero section" id="overview">
+            <div class="hero-copy">
+                <p class="eyebrow">Observed behavior. Explicit decisions.</p>
+                <h1>Catch missing product intent when an agent's work becomes observable.</h1>
+                <p class="hero-summary">The gate observes concrete system effects, checks whether the brief supports them, and pauses for a human answer when it doesn't. A fresh attempt is then verified against the completed decision set.</p>
+                <div class="hero-actions">
+                    <a class="button button-primary" href="#walkthrough">Explore a run</a>
+                    <a class="text-link" href="#coverage">See how observer coverage scales</a>
+                </div>
+            </div>
+            <div class="hero-proof" aria-label="Proof of concept summary">
+                <article class="proof-card">
+                    <span class="proof-number">02</span>
+                    <h2>Decisions observed</h2>
+                    <p>One artifact produces two independent product questions.</p>
+                </article>
+                <article class="proof-card">
+                    <span class="proof-number">01</span>
+                    <h2>Human pause</h2>
+                    <p>Both missing decisions are collected before work resumes.</p>
+                </article>
+                <article class="proof-card">
+                    <span class="proof-number">03</span>
+                    <h2>Reusable surfaces</h2>
+                    <p>API behavior, database behavior, and database structure use the same gate.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section" id="walkthrough">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Guided replay</p>
+                    <h2>Follow one complete decision loop</h2>
+                </div>
+                <p>This is a deterministic browser replay of the workspace-export scenario. It doesn't call a model or execute generated code.</p>
+            </div>
+
+            <div class="demo-shell">
+                <div class="demo-toolbar">
+                    <div>
+                        <span class="toolbar-label">Scenario</span>
+                        <strong>Workspace export authorization</strong>
+                    </div>
+                    <button class="mode-toggle" id="coverage-gap-toggle" type="button" aria-pressed="false">
+                        <span class="toggle-track" aria-hidden="true"><span></span></span>
+                        Show unmodeled outcome
+                    </button>
+                </div>
+
+                <div class="stage-rail" id="stage-rail" aria-label="Run stages"></div>
+                <div class="stage-content" id="stage-content" aria-live="polite"></div>
+            </div>
+        </section>
+
+        <section class="section" id="coverage">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Generalizable observation</p>
+                    <h2>Different surfaces, one gate lifecycle</h2>
+                </div>
+                <p>Each observer converts bounded system effects into normalized evidence. The save, review, answer, retry, and verification logic stays unchanged.</p>
+            </div>
+
+            <div class="coverage-shell">
+                <div class="surface-tabs" id="surface-tabs" role="tablist" aria-label="Observer surfaces">
+                    <button type="button" role="tab" data-surface="api" aria-selected="true">API behavior</button>
+                    <button type="button" role="tab" data-surface="database" aria-selected="false">Database behavior</button>
+                    <button type="button" role="tab" data-surface="structure" aria-selected="false">Database structure</button>
+                </div>
+                <div class="coverage-content" id="coverage-content"></div>
+            </div>
+        </section>
+
+        <section class="section" id="code-map">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Code map</p>
+                    <h2>Connect each concept to its implementation</h2>
+                </div>
+                <p>The demo links to a fixed source commit so every explanation can be checked against the corresponding code.</p>
+            </div>
+
+            <div class="code-grid">
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/scenarios.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">01</span>
+                    <div><h3>Scenario contract</h3><p>Brief, artifact target, decisions, options, and observer.</p><code>scenarios.py</code></div>
+                </a>
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/orchestrator.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">02</span>
+                    <div><h3>Run orchestration</h3><p>Fresh attempts, observations, reviews, and transitions.</p><code>orchestrator.py</code></div>
+                </a>
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/gate.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">03</span>
+                    <div><h3>Durable gate</h3><p>Typed state, decisions, evidence, and persisted runs.</p><code>gate.py</code></div>
+                </a>
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/api_probe.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">04</span>
+                    <div><h3>API observer</h3><p>Role calls, shared state, and normalized outcomes.</p><code>api_probe.py</code></div>
+                </a>
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/probe.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">05</span>
+                    <div><h3>Behavioral database probe</h3><p>Seeded data, migration effects, and rollback verification.</p><code>probe.py</code></div>
+                </a>
+                <a class="code-card" href="https://github.com/genesobolev/implicit-decision-gate/blob/9b71603bda6bb3b232a7c0da7df735e1939b34a5/src/implicit_decision_gate/postgres_surface.py" target="_blank" rel="noreferrer">
+                    <span class="code-index">06</span>
+                    <div><h3>Structural database surface</h3><p>Reusable catalog snapshots and attribute-level effects.</p><code>postgres_surface.py</code></div>
+                </a>
+            </div>
+        </section>
+
+        <section class="section deployment-note" aria-labelledby="deployment-title">
+            <div>
+                <p class="eyebrow">Deployment boundary</p>
+                <h2 id="deployment-title">Static evidence only</h2>
+            </div>
+            <p>The deployed site contains this interface and its fixed demonstration data. It has no server runtime, credentials, repository access, model connection, or execution capability.</p>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <span>Implicit Decision Gate proof of concept</span>
+        <a href="https://github.com/genesobolev/implicit-decision-gate" target="_blank" rel="noreferrer">GitHub repository</a>
+    </footer>
+
+    <noscript>This interactive explanation requires JavaScript.</noscript>
+</body>
+</html>
