@@ -6,6 +6,7 @@ flowchart LR
     observer[Disposable behavior observer]
     reviewer[Fresh Codex evidence reviewer]
     store[Durable run store]
+    platform[Later platform engineering review]
     verified[Return to wider verified loop]
     trust[Verified Loops trust controls]
 
@@ -14,11 +15,12 @@ flowchart LR
     orchestrator -->|Coding prompt| coder
     coder -->|Generated artifact| orchestrator
     orchestrator -->|Artifact and context| observer
-    observer -->|Typed observed outcomes| orchestrator
-    orchestrator -->|Brief and each outcome| reviewer
+    observer -->|Normalized observed outcomes| orchestrator
+    orchestrator -->|Covered outcomes and brief| reviewer
     reviewer -->|Evidence classifications| orchestrator
-    orchestrator -->|Decision requests| owner
+    orchestrator -->|Missing product decisions| owner
     owner -->|Typed owner decisions| orchestrator
-    orchestrator -->|State prompts evidence artifacts| store
+    orchestrator -->|Persist run state and evidence| store
+    store -.->|Coverage events for later review| platform
     orchestrator -->|Verified completion| verified
     trust -.->|Identity tools evidence permissions| orchestrator

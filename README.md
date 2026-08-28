@@ -48,7 +48,7 @@ production services, database schema, or authorization model.
 
 ## How the gate works
 
-![Lifecycle showing two observed decisions, one durable pause, two human answers, one fresh retry, and final verification.](notebooks/assets/diagrams/lifecycle.png)
+![Lifecycle showing the coverage-gap stop or, for covered outcomes, two human answers, one fresh retry, and final verification.](notebooks/assets/diagrams/lifecycle.png)
 
 [Review the Mermaid source.](notebooks/assets/diagrams/lifecycle.mmd)
 
@@ -175,7 +175,7 @@ performance. Those require targeted behavioral probes.
 
 ## Trust boundary
 
-![System context showing the human brief, coding process, behavior observer, evidence reviewer, durable gate, and wider verified loop.](notebooks/assets/diagrams/system_context.png)
+![System context showing the product workflow, durable gate, and separate platform review of persisted coverage events.](notebooks/assets/diagrams/system_context.png)
 
 [Review the Mermaid source.](notebooks/assets/diagrams/system_context.mmd)
 
