@@ -1,7 +1,5 @@
 "use strict";
 
-const SOURCE_COMMIT = "9b71603bda6bb3b232a7c0da7df735e1939b34a5";
-
 const normalSteps = [
     { id: "brief", label: "Brief" },
     { id: "observe", label: "Observe" },
@@ -17,10 +15,13 @@ const gapSteps = [
 ];
 
 const state = {
+    view: "walkthrough",
+    scenario: "api",
     step: "brief",
     coverageGap: false,
     administrator: null,
     repeat: null,
+    expiration: null,
     surface: "api",
     operation: "column",
 };
@@ -78,18 +79,29 @@ const structureOperations = {
     },
 };
 
+const appTabs = document.querySelector(".app-tabs");
+const scenarioTabs = document.querySelector(".scenario-tabs");
+const scenarioName = document.querySelector("#scenario-name");
 const stageRail = document.querySelector("#stage-rail");
 const stageContent = document.querySelector("#stage-content");
 const gapToggle = document.querySelector("#coverage-gap-toggle");
 const surfaceTabs = document.querySelector("#surface-tabs");
 const coverageContent = document.querySelector("#coverage-content");
 
-function sourceLink(path, label) {
-    return `<a class="source-link" href="https://github.com/genesobolev/implicit-decision-gate/blob/${SOURCE_COMMIT}/${path}" target="_blank" rel="noreferrer">${label}<span aria-hidden="true">↗</span></a>`;
-}
-
 function statusPill(label, tone = "neutral") {
     return `<span class="status-pill status-${tone}"><span aria-hidden="true"></span>${label}</span>`;
+}
+
+function hasCompleteDecisionSet() {
+    if (state.scenario === "database") return Boolean(state.expiration);
+    return Boolean(state.administrator && state.repeat);
+}
+
+function verificationHelp() {
+    if (state.scenario === "database") {
+        return "Choose an answer in step 4 to enable verification.";
+    }
+    return "Choose an answer for both questions in step 4 to enable verification.";
 }
 
 function renderRail() {
@@ -97,26 +109,40 @@ function renderRail() {
     const activeIndex = steps.findIndex((step) => step.id === state.step);
     stageRail.innerHTML = steps.map((step, index) => {
         const status = index < activeIndex ? "complete" : index === activeIndex ? "active" : "upcoming";
-        const disabled = !state.coverageGap && step.id === "verify" && (!state.administrator || !state.repeat);
+        const locked = !state.coverageGap && step.id === "verify" && !hasCompleteDecisionSet();
+        const help = verificationHelp();
         return `
-            <button class="stage-step stage-${status}" type="button" data-step="${step.id}" ${disabled ? "disabled" : ""} aria-current="${status === "active" ? "step" : "false"}">
-                <span class="step-marker">${index + 1}</span>
-                <span>${step.label}</span>
-            </button>
+            <span class="stage-step-slot ${locked ? "has-tooltip" : ""}">
+                <button
+                    class="stage-step stage-${status}"
+                    type="button"
+                    data-step="${step.id}"
+                    data-locked="${locked}"
+                    aria-disabled="${locked}"
+                    aria-current="${status === "active" ? "step" : "false"}"
+                    ${locked ? "aria-describedby=\"verify-step-help\"" : ""}
+                >
+                    <span class="step-marker">${index + 1}</span>
+                    <span>${step.label}</span>
+                </button>
+                ${locked ? `<span class="stage-tooltip" id="verify-step-help" role="tooltip">${help}</span>` : ""}
+            </span>
         `;
     }).join("");
+
     const activeButton = stageRail.querySelector(".stage-active");
     if (activeButton) {
         stageRail.scrollLeft = activeButton.offsetLeft - (stageRail.clientWidth - activeButton.offsetWidth) / 2;
     }
 }
 
-function briefStage() {
+function stageHeading(status, tone, title) {
+    return `<div class="stage-heading"><div>${statusPill(status, tone)}<h2>${title}</h2></div></div>`;
+}
+
+function apiBriefStage() {
     return `
-        <div class="stage-heading">
-            <div>${statusPill("STARTED", "neutral")}<h3>The brief defines required behavior, but leaves two choices open.</h3></div>
-            ${sourceLink("examples/workspace-export-authorization/brief.md", "Open brief")}
-        </div>
+        ${stageHeading("STARTED", "neutral", "The brief defines required behavior, but leaves two choices open.")}
         <div class="split-grid">
             <article class="content-card brief-card">
                 <span class="card-label">Authoritative brief</span>
@@ -133,7 +159,7 @@ function briefStage() {
     `;
 }
 
-function observationRows() {
+function apiObservationRows() {
     const repeatStatus = state.coverageGap ? "200" : "202";
     return `
         <div class="observation-row"><span class="role-dot owner"></span><strong>Owner, first request</strong><code>HTTP 202</code><span>+1 job</span></div>
@@ -143,13 +169,10 @@ function observationRows() {
     `;
 }
 
-function observeStage() {
+function apiObserveStage() {
     const repeatOutcome = state.coverageGap ? "UNMODELED" : "REUSE_ACTIVE_EXPORT";
     return `
-        <div class="stage-heading">
-            <div>${statusPill("OBSERVED", "blue")}<h3>The observer measures effects instead of asking the agent what it intended.</h3></div>
-            ${sourceLink("src/implicit_decision_gate/api_probe.py", "Open observer")}
-        </div>
+        ${stageHeading("OBSERVED", "blue", "The observer measures effects instead of asking the agent what it intended.")}
         <div class="split-grid split-observe">
             <article class="content-card code-panel">
                 <div class="card-top"><span class="card-label">Generated artifact</span><span>attempt-1.py</span></div>
@@ -163,7 +186,7 @@ function observeStage() {
             </article>
             <article class="content-card">
                 <span class="card-label">Observed calls</span>
-                <div class="observation-list">${observationRows()}</div>
+                <div class="observation-list">${apiObservationRows()}</div>
             </article>
         </div>
         <div class="outcome-strip">
@@ -174,27 +197,24 @@ function observeStage() {
     `;
 }
 
-function reviewStage() {
+function apiReviewStage() {
     return `
-        <div class="stage-heading">
-            <div>${statusPill("NOT_EVIDENCED", "amber")}<h3>Each observed choice is reviewed independently against the original brief.</h3></div>
-            ${sourceLink("src/implicit_decision_gate/agent.py", "Open review contract")}
-        </div>
+        ${stageHeading("NOT_EVIDENCED", "amber", "Each observed choice is reviewed independently against the original brief.")}
         <div class="decision-grid">
             <article class="decision-card">
                 <div class="decision-top"><span>Decision 01</span>${statusPill("NOT_EVIDENCED", "amber")}</div>
-                <h4>Administrator access</h4>
+                <h3>Administrator access</h3>
                 <p>Observed: <code>OWNER_ONLY</code></p>
                 <div class="evidence-box"><span>Brief evidence</span><strong>No supporting passage</strong></div>
             </article>
             <article class="decision-card">
                 <div class="decision-top"><span>Decision 02</span>${statusPill("NOT_EVIDENCED", "amber")}</div>
-                <h4>Repeated owner request</h4>
+                <h3>Repeated owner request</h3>
                 <p>Observed: <code>REUSE_ACTIVE_EXPORT</code></p>
                 <div class="evidence-box"><span>Brief evidence</span><strong>No supporting passage</strong></div>
             </article>
         </div>
-        <div class="logic-note"><span class="logic-icon">i</span><p>The gate aggregates both unsupported choices into one durable human pause.</p></div>
+        <div class="logic-note"><span class="logic-icon" aria-hidden="true">i</span><p>The gate aggregates both unsupported choices into one durable human pause.</p></div>
         <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-next="answer">Open decision request</button></div>
     `;
 }
@@ -209,13 +229,10 @@ function choice(name, value, label, detail, selected) {
     `;
 }
 
-function answerStage() {
-    const ready = state.administrator && state.repeat;
+function apiAnswerStage() {
+    const ready = hasCompleteDecisionSet();
     return `
-        <div class="stage-heading">
-            <div>${statusPill(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber")}<h3>Answer both product questions before a fresh attempt can start.</h3></div>
-            ${sourceLink("src/implicit_decision_gate/gate.py", "Open gate transition")}
-        </div>
+        ${stageHeading(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber", "Answer both product questions before a fresh attempt can start.")}
         <div class="decision-grid">
             <fieldset class="choice-group">
                 <legend><span>01</span>Who can create workspace exports?</legend>
@@ -232,14 +249,11 @@ function answerStage() {
     `;
 }
 
-function verifyStage() {
+function apiVerifyStage() {
     const adminAllowed = state.administrator === "OWNER_AND_ADMIN";
     const repeatCreates = state.repeat === "CREATE_ANOTHER_EXPORT";
     return `
-        <div class="stage-heading">
-            <div>${statusPill("COMPLETED", "green")}<h3>The same observer verifies every selected outcome on one fresh result.</h3></div>
-            ${sourceLink("src/implicit_decision_gate/orchestrator.py", "Open verification")}
-        </div>
+        ${stageHeading("COMPLETED", "green", "The same observer verifies every selected outcome on one fresh result.")}
         <div class="verification-layout">
             <article class="content-card">
                 <span class="card-label">Completed decision set</span>
@@ -255,21 +269,124 @@ function verifyStage() {
                 <div class="verify-row"><span>Member</span><code>403 / +0</code>${statusPill("MATCH", "green")}</div>
             </article>
         </div>
-        <div class="completion-banner"><span class="completion-check">✓</span><div><strong>Every expected outcome matches.</strong><p>The verified artifact can return to the wider development loop.</p></div></div>
+        <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>Every expected outcome matches.</strong><p>The verified artifact can return to the wider development loop.</p></div></div>
         <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answers</button><button class="button button-primary" type="button" data-restart>Replay from start</button></div>
     `;
 }
 
-function gapStage() {
+function databaseBriefStage() {
     return `
-        <div class="stage-heading">
-            <div>${statusPill("COVERAGE_GAP", "violet")}<h3>An unsupported observation stops the product workflow without becoming a product decision.</h3></div>
-            ${sourceLink("src/implicit_decision_gate/orchestrator.py", "Open coverage-gap path")}
+        ${stageHeading("STARTED", "neutral", "The brief defines expiration for new links, but not existing links.")}
+        <div class="split-grid">
+            <article class="content-card brief-card">
+                <span class="card-label">Authoritative brief</span>
+                <blockquote>Add 30-day expiration to newly created item-sharing links.</blockquote>
+            </article>
+            <article class="content-card">
+                <span class="card-label">What isn't specified</span>
+                <div class="open-question"><span>?</span><p>Should existing share links remain non-expiring or receive an expiration?</p></div>
+                <p class="card-note">The migration must choose a rollout policy for existing rows.</p>
+            </article>
         </div>
-        <div class="gap-layout">
-            <article class="content-card event-card">
-                <div class="card-top"><span class="card-label">Persisted coverage event</span><span>run.json</span></div>
-                <pre><code>{
+        <div class="stage-actions"><span></span><button class="button button-primary" type="button" data-next="observe">Observe attempt one</button></div>
+    `;
+}
+
+function databaseObserveStage() {
+    const newExpiration = state.coverageGap ? "NULL" : "+30 days";
+    const outcome = state.coverageGap ? "UNMODELED" : "PRESERVE_EXISTING";
+    return `
+        ${stageHeading("OBSERVED", "blue", "The database probe measures row effects inside a rolled-back transaction.")}
+        <div class="split-grid split-observe">
+            <article class="content-card code-panel">
+                <div class="card-top"><span class="card-label">Generated migration</span><span>attempt-1.sql</span></div>
+                <pre><code>ALTER TABLE share_links
+    ADD COLUMN expires_at timestamptz;
+
+${state.coverageGap ? "-- No default was added." : `ALTER TABLE share_links
+    ALTER COLUMN expires_at
+    SET DEFAULT (now() + interval '30 days');`}</code></pre>
+            </article>
+            <article class="content-card">
+                <span class="card-label">Observed rows</span>
+                <div class="observation-list">
+                    <div class="observation-row"><span class="role-dot existing"></span><strong>Existing link</strong><code>expires_at</code><span>NULL</span></div>
+                    <div class="observation-row ${state.coverageGap ? "row-warning" : ""}"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>${newExpiration}</span></div>
+                    <div class="observation-row"><span class="role-dot rollback"></span><strong>Probe cleanup</strong><code>transaction</code><span>rolled back</span></div>
+                </div>
+            </article>
+        </div>
+        <div class="outcome-strip outcome-strip-single">
+            <div><span>Existing-link policy</span><strong class="${state.coverageGap ? "text-warning" : ""}">${outcome}</strong></div>
+        </div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${state.coverageGap ? "gap" : "review"}">${state.coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
+    `;
+}
+
+function databaseReviewStage() {
+    return `
+        ${stageHeading("NOT_EVIDENCED", "amber", "The observed rollout choice isn't supported by the original brief.")}
+        <div class="decision-grid decision-grid-single">
+            <article class="decision-card">
+                <div class="decision-top"><span>Decision 01</span>${statusPill("NOT_EVIDENCED", "amber")}</div>
+                <h3>Existing share-link expiration</h3>
+                <p>Observed: <code>PRESERVE_EXISTING</code></p>
+                <div class="evidence-box"><span>Brief evidence</span><strong>No supporting passage</strong></div>
+            </article>
+        </div>
+        <div class="logic-note"><span class="logic-icon" aria-hidden="true">i</span><p>The gate pauses because the migration selected a policy that the brief didn't define.</p></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-next="answer">Open decision request</button></div>
+    `;
+}
+
+function databaseAnswerStage() {
+    const ready = hasCompleteDecisionSet();
+    return `
+        ${stageHeading(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber", "Choose the policy for existing share links before a fresh attempt can start.")}
+        <div class="decision-grid decision-grid-single">
+            <fieldset class="choice-group">
+                <legend><span>01</span>What should happen to existing links?</legend>
+                ${choice("expiration", "PRESERVE_EXISTING", "Preserve existing links", "Existing links remain non-expiring. New links expire after 30 days.", state.expiration === "PRESERVE_EXISTING")}
+                ${choice("expiration", "EXPIRE_EXISTING", "Expire existing links", "Existing and new links receive an expiration.", state.expiration === "EXPIRE_EXISTING")}
+            </fieldset>
+        </div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="review">Back</button><button class="button button-primary" type="button" data-next="verify" ${ready ? "" : "disabled"}>Start fresh attempt</button></div>
+    `;
+}
+
+function databaseVerifyStage() {
+    const expiresExisting = state.expiration === "EXPIRE_EXISTING";
+    return `
+        ${stageHeading("COMPLETED", "green", "The database probe verifies the selected rollout policy on a fresh migration.")}
+        <div class="verification-layout">
+            <article class="content-card">
+                <span class="card-label">Completed decision set</span>
+                <div class="contract-row"><span>Existing-link policy</span><strong>${state.expiration}</strong></div>
+                <div class="fresh-attempt"><span>Fresh process</span><span>Clean worktree</span><span>Original brief</span><span>Owner answer</span></div>
+            </article>
+            <article class="content-card verification-card">
+                <span class="card-label">Attempt two observation</span>
+                <div class="verify-row"><span>Existing link</span><code>${expiresExisting ? "+30 days" : "NULL"}</code>${statusPill("MATCH", "green")}</div>
+                <div class="verify-row"><span>New link</span><code>+30 days</code>${statusPill("MATCH", "green")}</div>
+                <div class="verify-row"><span>Probe cleanup</span><code>rolled back</code>${statusPill("MATCH", "green")}</div>
+            </article>
+        </div>
+        <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>Every expected outcome matches.</strong><p>The verified migration can return to the wider development loop.</p></div></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answer</button><button class="button button-primary" type="button" data-restart>Replay from start</button></div>
+    `;
+}
+
+function gapStage() {
+    const database = state.scenario === "database";
+    const event = database ? `{
+  "decision_id": "existing_share_link_expiration",
+  "observed": "UNMODELED",
+  "attempt_number": 1,
+  "facts": {
+    "existing_link_expires_at": null,
+    "new_link_expires_at": null
+  }
+}` : `{
   "decision_id": "workspace_export_repeat_request",
   "observed": "UNMODELED",
   "attempt_number": 1,
@@ -277,7 +394,13 @@ function gapStage() {
     "repeat_owner_status": 200,
     "repeat_owner_jobs_created": 0
   }
-}</code></pre>
+}`;
+    return `
+        ${stageHeading("COVERAGE_GAP", "violet", "An unsupported observation stops the product workflow without becoming a product decision.")}
+        <div class="gap-layout">
+            <article class="content-card event-card">
+                <div class="card-top"><span class="card-label">Persisted coverage event</span><span>run.json</span></div>
+                <pre><code>${event}</code></pre>
             </article>
             <div class="gap-route" aria-label="Coverage gap route">
                 <div class="route-node route-stop"><span>1</span><div><strong>Product run stops</strong><p>No evidence review, owner request, or retry.</p></div></div>
@@ -292,14 +415,23 @@ function gapStage() {
 }
 
 function renderStage() {
-    const stages = {
-        brief: briefStage,
-        observe: observeStage,
-        review: reviewStage,
-        answer: answerStage,
-        verify: verifyStage,
+    const apiStages = {
+        brief: apiBriefStage,
+        observe: apiObserveStage,
+        review: apiReviewStage,
+        answer: apiAnswerStage,
+        verify: apiVerifyStage,
         gap: gapStage,
     };
+    const databaseStages = {
+        brief: databaseBriefStage,
+        observe: databaseObserveStage,
+        review: databaseReviewStage,
+        answer: databaseAnswerStage,
+        verify: databaseVerifyStage,
+        gap: gapStage,
+    };
+    const stages = state.scenario === "database" ? databaseStages : apiStages;
     stageContent.innerHTML = stages[state.step]();
     renderRail();
 }
@@ -307,26 +439,26 @@ function renderStage() {
 function apiCoverage() {
     return `
         <div class="coverage-flow">
-            <article class="surface-card"><span class="flow-index">01</span><h3>Generated handler</h3><p>One Python function accepts a role and shared export-job state.</p><code>create_export(role, jobs)</code></article>
+            <article class="surface-card"><span class="flow-index">01</span><h2>Generated handler</h2><p>One Python function accepts a role and shared export-job state.</p><code>create_export(role, jobs)</code></article>
             <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card"><span class="flow-index">02</span><h3>Four bounded calls</h3><p>Owner twice with shared state, then administrator and member.</p><code>status + jobs_created</code></article>
+            <article class="surface-card"><span class="flow-index">02</span><h2>Four bounded calls</h2><p>Owner twice with shared state, then administrator and member.</p><code>status + jobs_created</code></article>
             <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card surface-result"><span class="flow-index">03</span><h3>Two typed outcomes</h3><p><strong>OWNER_ONLY</strong><br><strong>REUSE_ACTIVE_EXPORT</strong></p><code>ObservationResult</code></article>
+            <article class="surface-card surface-result"><span class="flow-index">03</span><h2>Two typed outcomes</h2><p><strong>OWNER_ONLY</strong><br><strong>REUSE_ACTIVE_EXPORT</strong></p><code>ObservationResult</code></article>
         </div>
-        <div class="surface-summary"><strong>One observer, two product decisions.</strong><span>The gate receives the same normalized result type used by every scenario.</span>${sourceLink("src/implicit_decision_gate/api_probe.py", "Inspect API observer")}</div>
+        <div class="surface-summary"><strong>One observer, two product decisions.</strong><span>The gate receives the same normalized result type used by every scenario.</span></div>
     `;
 }
 
 function databaseCoverage() {
     return `
         <div class="coverage-flow">
-            <article class="surface-card"><span class="flow-index">01</span><h3>Seed known state</h3><p>Create an existing share link before applying the migration.</p><code>expires_at = NULL</code></article>
+            <article class="surface-card"><span class="flow-index">01</span><h2>Seed known state</h2><p>Create an existing share link before applying the migration.</p><code>expires_at = NULL</code></article>
             <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card"><span class="flow-index">02</span><h3>Apply and probe</h3><p>Run the migration, insert a new link, inspect both rows, then roll back.</p><code>transactional probe</code></article>
+            <article class="surface-card"><span class="flow-index">02</span><h2>Apply and probe</h2><p>Run the migration, insert a new link, inspect both rows, then roll back.</p><code>transactional probe</code></article>
             <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card surface-result"><span class="flow-index">03</span><h3>One typed outcome</h3><p><strong>PRESERVE_EXISTING</strong></p><code>rollback_verified = true</code></article>
+            <article class="surface-card surface-result"><span class="flow-index">03</span><h2>One typed outcome</h2><p><strong>PRESERVE_EXISTING</strong></p><code>rollback_verified = true</code></article>
         </div>
-        <div class="surface-summary"><strong>Behavior is established from database effects.</strong><span>The observer doesn't infer rollout policy from the SQL text.</span>${sourceLink("src/implicit_decision_gate/probe.py", "Inspect database probe")}</div>
+        <div class="surface-summary"><strong>Behavior is established from database effects.</strong><span>The observer doesn't infer rollout policy from the SQL text.</span></div>
     `;
 }
 
@@ -355,7 +487,7 @@ function structureCoverage() {
                 <div class="rule-set"><span class="${operation.rule === "schema_shape" ? "rule-active" : ""}">schema_shape</span><span class="${operation.rule === "data_integrity" ? "rule-active" : ""}">data_integrity</span><span class="${operation.rule === "indexing" ? "rule-active" : ""}">indexing</span></div>
             </article>
         </div>
-        <div class="surface-summary"><strong>Three rules cover many structural operations.</strong><span>New rules extend observation coverage without changing the gate lifecycle.</span>${sourceLink("src/implicit_decision_gate/postgres_surface.py", "Inspect structural surface")}</div>
+        <div class="surface-summary"><strong>Three rules cover many structural operations.</strong><span>New rules extend observation coverage without changing the gate lifecycle.</span></div>
     `;
 }
 
@@ -367,9 +499,46 @@ function renderCoverage() {
     });
 }
 
+function resetWalkthrough() {
+    state.step = "brief";
+    state.coverageGap = false;
+    state.administrator = null;
+    state.repeat = null;
+    state.expiration = null;
+    gapToggle.setAttribute("aria-pressed", "false");
+}
+
+function renderView() {
+    document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.viewPanel !== state.view;
+    });
+    appTabs.querySelectorAll("[data-view]").forEach((button) => {
+        button.setAttribute("aria-selected", String(button.dataset.view === state.view));
+    });
+}
+
+appTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-view]");
+    if (!button) return;
+    state.view = button.dataset.view;
+    renderView();
+});
+
+scenarioTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-scenario]");
+    if (!button || button.dataset.scenario === state.scenario) return;
+    state.scenario = button.dataset.scenario;
+    resetWalkthrough();
+    scenarioName.textContent = state.scenario === "database" ? "Share-link expiration" : "Workspace export authorization";
+    scenarioTabs.querySelectorAll("[data-scenario]").forEach((tab) => {
+        tab.setAttribute("aria-selected", String(tab.dataset.scenario === state.scenario));
+    });
+    renderStage();
+});
+
 stageRail.addEventListener("click", (event) => {
     const button = event.target.closest("[data-step]");
-    if (!button || button.disabled) return;
+    if (!button || button.dataset.locked === "true") return;
     state.step = button.dataset.step;
     renderStage();
 });
@@ -381,19 +550,14 @@ stageContent.addEventListener("click", (event) => {
     if (!next && !back && !restart) return;
     if (next && !next.disabled) state.step = next.dataset.next;
     if (back) state.step = back.dataset.back;
-    if (restart) {
-        state.coverageGap = state.step === "gap" ? false : state.coverageGap;
-        state.step = "brief";
-        state.administrator = null;
-        state.repeat = null;
-        gapToggle.setAttribute("aria-pressed", String(state.coverageGap));
-    }
+    if (restart) resetWalkthrough();
     renderStage();
 });
 
 stageContent.addEventListener("change", (event) => {
     if (event.target.name === "administrator") state.administrator = event.target.value;
     if (event.target.name === "repeat") state.repeat = event.target.value;
+    if (event.target.name === "expiration") state.expiration = event.target.value;
     renderStage();
 });
 
@@ -402,6 +566,7 @@ gapToggle.addEventListener("click", () => {
     state.step = state.step === "brief" ? "brief" : "observe";
     state.administrator = null;
     state.repeat = null;
+    state.expiration = null;
     gapToggle.setAttribute("aria-pressed", String(state.coverageGap));
     renderStage();
 });
@@ -420,5 +585,6 @@ coverageContent.addEventListener("click", (event) => {
     renderCoverage();
 });
 
+renderView();
 renderStage();
 renderCoverage();
