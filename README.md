@@ -16,6 +16,8 @@ description of its own work.
 - A separate evidence review can compare each observed behavior with the original brief.
 - The gate can collect all required human answers in one durable pause.
 - One fresh coding attempt can be verified against the complete decision set.
+- An unmodeled observation can be recorded for later platform review without becoming a
+    product decision or execution error.
 - Different observers can reuse the same save, review, answer, retry, and verification
     lifecycle.
 
@@ -52,16 +54,18 @@ production services, database schema, or authorization model.
 
 1. Pin the authoritative brief and technical context to one Git commit.
 2. Ask a fresh coding process to generate one scenario artifact.
-3. Execute the artifact with a bounded observer and normalize its effects into typed
-    outcomes.
-4. Review each outcome independently against the original brief.
-5. If any choices are unsupported, persist one pause and collect the required owner
+3. Execute the artifact with a bounded observer and normalize its effects.
+4. If an effect is outside approved coverage, persist a structured `COVERAGE_GAP` event
+    for later platform review and stop the product workflow.
+5. Otherwise, review each typed outcome independently against the original brief.
+6. If any choices are unsupported, persist one pause and collect the required owner
     answers.
-6. Start one clean coding attempt with the original inputs and all selected answers.
-7. Run the same observer and compare every expected outcome with the regenerated result.
+7. Start one clean coding attempt with the original inputs and all selected answers.
+8. Run the same observer and compare every expected outcome with the regenerated result.
 
-An unmodeled effect, contradictory evidence, execution error, or second-attempt mismatch
-ends the run in `FAILED`.
+Contradictory evidence, an execution error, or a second-attempt mismatch ends the run in
+`FAILED`. An unmodeled first-attempt effect ends in `COVERAGE_GAP` without invoking the
+evidence reviewer, product owner, or second coding attempt.
 
 ## Run the primary demo
 
@@ -127,7 +131,9 @@ The first owner request must return 202 and create one job. A member request mus
 - Whether the second owner request creates another job or succeeds without creating an
     additional job.
 
-Any unsupported combination is `UNMODELED` and fails before evidence review.
+Any unsupported combination is `UNMODELED`. The gate records its normalized facts and
+artifact digest as a coverage event, returns `COVERAGE_GAP`, and stops before evidence
+review.
 
 ### PostgreSQL share-link behavior
 
@@ -182,6 +188,11 @@ performance. Those require targeted behavioral probes.
 | Human owner | Supplies missing product decisions |
 | Gate | Persists state, controls transitions, and verifies regenerated outcomes |
 
+An unmodeled result isn't sent to the human owner. The run records the decision
+identifier, normalized facts and effects, attempt number, artifact digest, and pinned
+commit. A separate platform workflow can later aggregate these events and decide whether
+the observer's approved coverage should change through normal engineering review.
+
 The first and second coding attempts use separate processes and clean detached worktrees
 at the same original commit. Attempt two receives the original brief, technical context,
 and selected owner decisions. It doesn't receive attempt one's artifact, model response,
@@ -199,8 +210,10 @@ controlled tool access, attributable evidence, and permission enforcement.
 
 The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) presents the
 workspace-export value path: two observed decisions, one durable pause, two human answers,
-one clean retry, and direct verification of both outcomes. It retains the system-context,
-lifecycle, and gate-logic diagrams while hiding low-level setup details.
+one clean retry, and direct verification of both outcomes. If a live first attempt instead
+produces an unmodeled result, the notebook displays the persisted coverage event and skips
+the product-decision and retry cells without raising an execution error. It retains the
+system-context, lifecycle, and gate-logic diagrams while hiding low-level setup details.
 
 Launch it from the repository root:
 

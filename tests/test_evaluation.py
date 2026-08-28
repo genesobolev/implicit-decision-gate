@@ -63,7 +63,7 @@ CASES = (
         SHARE_LINK_EXPIRATION,
         ("-- OTHER",),
         (),
-        RunState.FAILED,
+        RunState.COVERAGE_GAP,
     ),
     EvaluationCase(
         "authorization converges",
@@ -122,7 +122,7 @@ CASES = (
         WORKSPACE_EXPORT_AUTHORIZATION,
         ("# OTHER",),
         (),
-        RunState.FAILED,
+        RunState.COVERAGE_GAP,
     ),
 )
 

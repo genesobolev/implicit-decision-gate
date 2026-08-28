@@ -1,5 +1,8 @@
 flowchart TD
-    observed[Observer returns typed outcomes]
+    observed[Observer returns normalized outcomes]
+    covered{Every outcome matches approved coverage}
+    coverageGap[COVERAGE_GAP event]
+    platform[Later platform engineering review]
     review[Review each outcome against the brief]
     result{Aggregate review result}
     pause[One AWAITING_OWNER pause]
@@ -13,7 +16,10 @@ flowchart TD
     completeSecond[COMPLETED]
     failedRetry[FAILED]
 
-    observed --> review
+    observed --> covered
+    covered -->|No| coverageGap
+    coverageGap -.-> platform
+    covered -->|Yes| review
     review --> result
     result -->|Contradicted| failedReview
     result -->|All supported| completeFirst

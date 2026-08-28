@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import stat
 import subprocess
 import sys
@@ -32,7 +33,7 @@ from implicit_decision_gate.probe import (
     EXPIRE_EXISTING,
     PRESERVE_EXISTING,
 )
-from implicit_decision_gate.scenario import ObservationResult
+from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
 from implicit_decision_gate.scenarios import (
     WORKSPACE_EXPORT_AUTHORIZATION,
     scenario_registry,
@@ -420,11 +421,15 @@ def test_retry_verifies_supported_outcome_while_honoring_owner_answer(
     assert completed.decisions[1].selected == REUSE_ACTIVE_EXPORT
 
 
-@pytest.mark.parametrize("second_sql", ["-- EXPIRE_EXISTING", "-- OTHER"])
+@pytest.mark.parametrize(
+    ("second_sql", "expected_coverage_gaps"),
+    [("-- EXPIRE_EXISTING", 0), ("-- OTHER", 1)],
+)
 def test_second_attempt_mismatch_or_unmodeled_fails(
     reference_repo: Path,
     tmp_path: Path,
     second_sql: str,
+    expected_coverage_gaps: int,
 ) -> None:
     first = orchestrator(
         reference_repo,
@@ -453,6 +458,7 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
 
     assert failed.state is RunState.FAILED
     assert len(failed.attempts) == 2
+    assert len(failed.coverage_gaps) == expected_coverage_gaps
     assert len(second_client.prompts) == 1
     with pytest.raises(GateError, match="AWAITING_OWNER"):
         Orchestrator(
@@ -465,22 +471,111 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
         )
 
 
-def test_unmodeled_first_attempt_fails_without_review(
+def test_unmodeled_first_attempt_records_coverage_gap_without_review(
     reference_repo: Path,
     tmp_path: Path,
 ) -> None:
     reviewer = ScriptedReviewerClient([])
-    run = orchestrator(
+    controller = orchestrator(
         reference_repo,
         tmp_path / "worktrees",
         ScriptedCodingClient(["-- OTHER"]),
         reviewer,
         ScriptMarkerProbe(),
-    ).start()
+    )
 
-    assert run.state is RunState.FAILED
+    run = controller.start()
+
+    assert run.state is RunState.COVERAGE_GAP
+    assert run.error is None
     assert reviewer.prompts == []
     assert run.decisions == []
+    assert len(run.coverage_gaps) == 1
+    assert run.coverage_gaps[0].decision_id == EXISTING_LINK_ROLLOUT
+    assert run.coverage_gaps[0].observed == "UNMODELED"
+    assert run.coverage_gaps[0].attempt_number == 1
+
+    summary = json.loads(controller.show(run.run_id))
+    assert summary["state"] == "COVERAGE_GAP"
+    assert summary["coverage_gaps"] == [
+        {
+            "run_id": run.run_id,
+            "scenario": "share-link-expiration",
+            "base_commit": run.base_commit,
+            "decision_id": EXISTING_LINK_ROLLOUT,
+            "question": "What should happen to existing item-sharing links?",
+            "observed": "UNMODELED",
+            "attempt_number": 1,
+            "facts": {
+                "data_type": "timestamp with time zone",
+                "nullable": True,
+                "column_default": "CURRENT_TIMESTAMP + interval '30 days'",
+                "insert_without_value": "approximately_now_plus_30_days",
+                "existing_row": "other",
+                "rollback_verified": True,
+            },
+            "effects": [],
+            "artifact_digest": run.attempts[0].artifact_digest,
+        }
+    ]
+    with pytest.raises(GateError, match="READY_TO_RESUME"):
+        controller.resume(run.run_id)
+    with pytest.raises(GateError, match="AWAITING_OWNER"):
+        controller.answer(run.run_id, EXISTING_LINK_ROLLOUT, PRESERVE_EXISTING)
+
+
+def test_one_unmodeled_outcome_routes_the_whole_attempt_to_platform_coverage(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    reviewer = ScriptedReviewerClient([])
+    observer = FixedOutcomeProbe(
+        {
+            ADMINISTRATOR_ACCESS: OWNER_ONLY,
+            REPEAT_REQUEST: UNMODELED_OUTCOME,
+        }
+    )
+    controller = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(observer, observer),
+        coding_client=ScriptedCodingClient(["generated handler"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    run = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert run.state is RunState.COVERAGE_GAP
+    assert reviewer.prompts == []
+    assert run.decisions == []
+    assert [gap.decision_id for gap in run.coverage_gaps] == [REPEAT_REQUEST]
+
+
+def test_undeclared_outcome_string_remains_an_observer_contract_failure(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    reviewer = ScriptedReviewerClient([])
+    observer = FixedOutcomeProbe(
+        {
+            ADMINISTRATOR_ACCESS: OWNER_ONLY,
+            REPEAT_REQUEST: "OTHER",
+        }
+    )
+    controller = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(observer, observer),
+        coding_client=ScriptedCodingClient(["generated handler"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    )
+
+    run = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert run.state is RunState.FAILED
+    assert run.error == (f"Attempt one returned an undeclared outcome for {REPEAT_REQUEST}: OTHER")
+    assert run.coverage_gaps == []
+    assert reviewer.prompts == []
 
 
 @pytest.mark.parametrize(

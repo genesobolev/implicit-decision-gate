@@ -63,6 +63,14 @@ class DeterministicCodexClient:
         )
 
 
+class UnmodeledCodexClient(DeterministicCodexClient):
+    """Return one valid artifact outside the observer's approved vocabulary."""
+
+    def propose_artifact(self, prompt: str) -> str:
+        del prompt
+        return "-- OTHER"
+
+
 def test_cli_pauses_inspects_answers_and_resumes(
     reference_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -223,6 +231,41 @@ def test_cli_collects_two_answers_before_one_retry(
     completed = json.loads(capsys.readouterr().out)
     assert completed["state"] == "COMPLETED"
     assert len(completed["attempt_digests"]) == 2
+
+
+def test_cli_reports_coverage_gap_without_an_execution_error(
+    reference_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(reference_repo)
+    monkeypatch.setattr(
+        "implicit_decision_gate.cli.CodexCLIModelClient",
+        UnmodeledCodexClient,
+    )
+    monkeypatch.setattr(
+        "implicit_decision_gate.cli.PostgresProbe",
+        lambda _: ScriptMarkerProbe(),
+    )
+
+    assert main(["start"]) == 0
+    started = json.loads(capsys.readouterr().out)
+
+    assert started["state"] == "COVERAGE_GAP"
+    assert started["error"] is None
+    assert started["decision_requests"] == []
+    assert started["classifications"] == {}
+    assert [invocation["role"] for invocation in started["model_invocations"]] == ["CODING_AGENT"]
+    assert len(started["coverage_gaps"]) == 1
+    gap = started["coverage_gaps"][0]
+    assert gap["run_id"] == started["run_id"]
+    assert gap["scenario"] == started["scenario"]
+    assert gap["base_commit"]
+    assert gap["decision_id"] == "existing_item_sharing_link_rollout"
+    assert gap["observed"] == "UNMODELED"
+    assert gap["facts"]["existing_row"] == "other"
+    assert gap["artifact_digest"] == started["attempt_digests"][0]
+    assert started["final_worktree_path"] is not None
 
 
 def test_start_rejects_the_removed_backend_selector(

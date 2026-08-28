@@ -14,6 +14,7 @@ from implicit_decision_gate.agent import (
 )
 from implicit_decision_gate.gate import (
     AttemptRecord,
+    CoverageGapRecord,
     DecisionRecord,
     EvidenceClassification,
     GateError,
@@ -202,13 +203,27 @@ class Orchestrator:
         for decision in scenario.decisions:
             outcome = observation.outcomes[decision.id]
             option = option_by_id(decision, outcome)
-            if outcome == UNMODELED_OUTCOME or option is None:
+            if outcome == UNMODELED_OUTCOME:
+                run.coverage_gaps.append(
+                    CoverageGapRecord(
+                        decision_id=decision.id,
+                        observed=outcome,
+                        attempt_number=1,
+                    )
+                )
+                continue
+            if option is None:
                 run.state = RunState.FAILED
                 run.error = (
-                    f"Attempt one produced an unmodeled outcome for {decision.id}: {outcome}"
+                    f"Attempt one returned an undeclared outcome for {decision.id}: {outcome}"
                 )
                 return
             modeled.append((decision, option))
+
+        if run.coverage_gaps:
+            run.state = RunState.COVERAGE_GAP
+            run.error = None
+            return
 
         classifications = []
         reviewer_client = self._reviewer_client()
@@ -272,6 +287,16 @@ class Orchestrator:
             for decision_id, option in expected.items()
             if observation.outcomes.get(decision_id) != option
         ]
+        for decision_id in expected:
+            observed = observation.outcomes.get(decision_id)
+            if observed == UNMODELED_OUTCOME:
+                run.coverage_gaps.append(
+                    CoverageGapRecord(
+                        decision_id=decision_id,
+                        observed=observed,
+                        attempt_number=2,
+                    )
+                )
         extra = sorted(set(observation.outcomes) - set(expected))
         mismatches.extend(f"{decision_id}: unexpected outcome" for decision_id in extra)
         if not mismatches:
