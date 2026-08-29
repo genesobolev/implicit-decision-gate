@@ -460,6 +460,71 @@ label:has(input:focus-visible) {
     transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
+.workflow-node[data-workflow-node="started"] {
+    top: 245px;
+    left: 25px;
+}
+
+.workflow-node[data-workflow-node="attempt1"] {
+    top: 245px;
+    left: 205px;
+}
+
+.workflow-node[data-workflow-node="observe1"] {
+    top: 245px;
+    left: 385px;
+}
+
+.workflow-node[data-workflow-node="outcomes"] {
+    top: 245px;
+    left: 565px;
+}
+
+.workflow-node[data-workflow-node="coverage_gap"] {
+    top: 30px;
+    left: 565px;
+}
+
+.workflow-node[data-workflow-node="review"] {
+    top: 245px;
+    left: 745px;
+}
+
+.workflow-node[data-workflow-node="completed_first"] {
+    top: 30px;
+    left: 745px;
+}
+
+.workflow-node[data-workflow-node="awaiting_owner"] {
+    top: 245px;
+    left: 925px;
+}
+
+.workflow-node[data-workflow-node="ready"] {
+    top: 245px;
+    left: 1105px;
+}
+
+.workflow-node[data-workflow-node="attempt2"] {
+    top: 455px;
+    left: 1105px;
+}
+
+.workflow-node[data-workflow-node="verify"] {
+    top: 455px;
+    left: 925px;
+}
+
+.workflow-node[data-workflow-node="completed_verified"] {
+    top: 455px;
+    left: 745px;
+}
+
+.workflow-node[data-workflow-node="failed"] {
+    top: 625px;
+    left: 565px;
+}
+
 .workflow-node:hover {
     border-color: var(--brand-blue);
     box-shadow: 0 7px 17px rgba(40, 59, 91, 0.14);
