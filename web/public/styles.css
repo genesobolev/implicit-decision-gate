@@ -105,19 +105,9 @@ label:has(input:focus-visible) {
     letter-spacing: -0.02em;
 }
 
-.app-identity div {
-    display: grid;
-    gap: 1px;
-}
-
 .app-identity strong {
     color: var(--intrepid-blue);
     font-size: 15px;
-}
-
-.app-identity div > span {
-    color: var(--text-faint);
-    font-size: 12px;
 }
 
 .app-tabs {
@@ -180,17 +170,11 @@ label:has(input:focus-visible) {
 }
 
 .view-header h1 {
-    margin: 2px 0 5px;
+    margin: 0;
     color: var(--intrepid-blue);
-    font-size: clamp(25px, 2.5vw, 34px);
+    font-size: 26px;
     line-height: 1.15;
     letter-spacing: -0.025em;
-}
-
-.view-header p {
-    max-width: 720px;
-    margin: 0;
-    color: var(--text-soft);
 }
 
 .scenario-tabs {
@@ -250,14 +234,9 @@ label:has(input:focus-visible) {
     font-size: 16px;
 }
 
-.workflow-scenario-summary > span:last-child {
-    color: var(--text-soft);
-    font-size: 12px;
-}
-
 .workflow-example-switch {
     display: grid;
-    width: min(520px, 48vw);
+    width: min(400px, 48vw);
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding: 5px;
@@ -267,16 +246,14 @@ label:has(input:focus-visible) {
 }
 
 .workflow-example-switch button {
-    display: grid;
-    gap: 1px;
-    min-height: 54px;
-    padding: 8px 18px;
+    min-height: 44px;
+    padding: 8px 12px;
     border: 0;
     border-radius: 9px;
     background: transparent;
     color: var(--text-soft);
     cursor: pointer;
-    text-align: left;
+    text-align: center;
 }
 
 .workflow-example-switch button:hover {
@@ -290,17 +267,8 @@ label:has(input:focus-visible) {
 }
 
 .workflow-example-switch button > span {
-    font-size: 15px;
-    font-weight: 750;
-}
-
-.workflow-example-switch button small {
-    color: var(--text-faint);
-    font-size: 11px;
-}
-
-.workflow-example-switch button[aria-selected="true"] small {
-    color: #4b6590;
+    font-size: 13px;
+    font-weight: 650;
 }
 
 .workflow-legend {
@@ -518,14 +486,6 @@ label:has(input:focus-visible) {
     overflow: hidden;
     font-size: 12px;
     line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.workflow-node small {
-    overflow: hidden;
-    color: var(--text-faint);
-    font-size: 9px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1877,6 +1837,18 @@ code {
     margin-top: 22px;
 }
 
+.stage-actions .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+}
+
+.button-arrow {
+    font-size: 15px;
+    line-height: 1;
+}
+
 .button {
     min-height: 39px;
     padding: 9px 15px;
@@ -2311,10 +2283,6 @@ noscript {
         min-height: auto;
         gap: 10px;
         padding: 12px 14px 0;
-    }
-
-    .app-identity div > span {
-        display: none;
     }
 
     .brand-mark {
