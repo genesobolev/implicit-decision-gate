@@ -54,8 +54,6 @@ const state = {
 const workflowNodes = [
     {
         id: "started",
-        x: 25,
-        y: 245,
         title: "Run starts",
         state: "STARTED",
         tone: "normal",
@@ -68,8 +66,6 @@ const workflowNodes = [
     },
     {
         id: "attempt1",
-        x: 205,
-        y: 245,
         title: "Attempt one",
         state: "STARTED",
         tone: "normal",
@@ -82,8 +78,6 @@ const workflowNodes = [
     },
     {
         id: "observe1",
-        x: 385,
-        y: 245,
         title: "Observe effects",
         state: "STARTED",
         tone: "normal",
@@ -96,8 +90,6 @@ const workflowNodes = [
     },
     {
         id: "outcomes",
-        x: 565,
-        y: 245,
         title: "Validate outcomes",
         state: "STARTED",
         tone: "normal",
@@ -110,8 +102,6 @@ const workflowNodes = [
     },
     {
         id: "coverage_gap",
-        x: 565,
-        y: 30,
         title: "Coverage gap",
         state: "COVERAGE_GAP",
         tone: "gap",
@@ -124,8 +114,6 @@ const workflowNodes = [
     },
     {
         id: "review",
-        x: 745,
-        y: 245,
         title: "Review evidence",
         state: "STARTED",
         tone: "normal",
@@ -138,8 +126,6 @@ const workflowNodes = [
     },
     {
         id: "completed_first",
-        x: 745,
-        y: 30,
         title: "Review complete",
         state: "COMPLETED",
         tone: "complete",
@@ -152,8 +138,6 @@ const workflowNodes = [
     },
     {
         id: "awaiting_owner",
-        x: 925,
-        y: 245,
         title: "Request decisions",
         state: "AWAITING_OWNER",
         tone: "owner",
@@ -166,8 +150,6 @@ const workflowNodes = [
     },
     {
         id: "ready",
-        x: 1105,
-        y: 245,
         title: "Ready to resume",
         state: "READY_TO_RESUME",
         tone: "normal",
@@ -180,8 +162,6 @@ const workflowNodes = [
     },
     {
         id: "attempt2",
-        x: 1105,
-        y: 455,
         title: "Attempt two",
         state: "READY_TO_RESUME",
         tone: "normal",
@@ -194,8 +174,6 @@ const workflowNodes = [
     },
     {
         id: "verify",
-        x: 925,
-        y: 455,
         title: "Verify outcomes",
         state: "READY_TO_RESUME",
         tone: "normal",
@@ -208,8 +186,6 @@ const workflowNodes = [
     },
     {
         id: "completed_verified",
-        x: 745,
-        y: 455,
         title: "Verified complete",
         state: "COMPLETED",
         tone: "complete",
@@ -222,8 +198,6 @@ const workflowNodes = [
     },
     {
         id: "failed",
-        x: 565,
-        y: 625,
         title: "Run fails",
         state: "FAILED",
         tone: "failed",
@@ -359,7 +333,6 @@ function workflowNodeMarkup(node) {
             data-workflow-node="${node.id}"
             aria-pressed="${selected}"
             aria-controls="workflow-inspector"
-            style="left: ${node.x}px; top: ${node.y}px"
         >
             <span class="workflow-node-state">${node.state}</span>
             <strong>${node.title}</strong>
