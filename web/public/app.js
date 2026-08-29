@@ -63,7 +63,6 @@ const workflowNodes = [
         title: "Run starts",
         state: "STARTED",
         tone: "normal",
-        context: { api: "Pinned API inputs", database: "Pinned database inputs" },
         summary: "The gate creates a durable run before any model or observer executes.",
         persists: ["Original brief", "Pinned Git commit", "Scenario identifier", "STARTED state"],
         facts: {
@@ -78,7 +77,6 @@ const workflowNodes = [
         title: "Attempt one",
         state: "STARTED",
         tone: "normal",
-        context: { api: "Fresh Python artifact", database: "Fresh SQL migration" },
         summary: "A fresh coding process receives the original brief and technical context.",
         persists: ["Clean worktree record", "Coding prompt", "Model provenance", "Artifact digest"],
         facts: {
@@ -93,7 +91,6 @@ const workflowNodes = [
         title: "Observe effects",
         state: "STARTED",
         tone: "normal",
-        context: { api: "Four bounded calls", database: "Transactional row probe" },
         summary: "A bounded observer records system effects without relying on the coding model's explanation.",
         persists: ["Normalized facts", "Observed effects", "Typed outcomes", "Attempt completion time"],
         facts: {
@@ -108,7 +105,6 @@ const workflowNodes = [
         title: "Validate outcomes",
         state: "STARTED",
         tone: "normal",
-        context: { api: "Two outcome identifiers", database: "One outcome identifier" },
         summary: "The gate checks that every declared decision has exactly one covered or unmodeled outcome.",
         persists: ["Outcome identifiers", "Coverage-gap facts when present", "Validation error when invalid"],
         facts: {
@@ -123,7 +119,6 @@ const workflowNodes = [
         title: "Coverage gap",
         state: "COVERAGE_GAP",
         tone: "gap",
-        context: { api: "Unsupported API effect", database: "Unsupported row effect" },
         summary: "An unmodeled first-attempt effect ends the product workflow without becoming a human product decision.",
         persists: ["Coverage-gap record", "Normalized facts and effects", "Artifact digest", "Attempt number"],
         facts: {
@@ -138,7 +133,6 @@ const workflowNodes = [
         title: "Review evidence",
         state: "STARTED",
         tone: "normal",
-        context: { api: "Two independent reviews", database: "One independent review" },
         summary: "Each modeled choice is reviewed independently against the original brief.",
         persists: ["Reviewer prompt per decision", "Evidence classification", "Evidence quote", "Reviewer provenance"],
         facts: {
@@ -153,7 +147,6 @@ const workflowNodes = [
         title: "Review complete",
         state: "COMPLETED",
         tone: "complete",
-        context: { api: "Both choices supported", database: "Rollout choice supported" },
         summary: "The first artifact completes the run when the brief supports every observed choice.",
         persists: ["Completed decision records", "Attempt-one artifact digest", "COMPLETED state"],
         facts: {
@@ -168,7 +161,6 @@ const workflowNodes = [
         title: "Request decisions",
         state: "AWAITING_OWNER",
         tone: "owner",
-        context: { api: "Up to two owner answers", database: "One owner answer" },
         summary: "The gate presents every unsupported or uncertain product choice in one durable pause.",
         persists: ["Typed decision requests", "Available options", "Each submitted answer", "Answer timestamps"],
         facts: {
@@ -183,7 +175,6 @@ const workflowNodes = [
         title: "Ready to resume",
         state: "READY_TO_RESUME",
         tone: "normal",
-        context: { api: "Complete two-decision set", database: "Complete one-decision set" },
         summary: "Recording the final required answer completes the decision set without invoking a model.",
         persists: ["Complete selected decision set", "READY_TO_RESUME state"],
         facts: {
@@ -198,7 +189,6 @@ const workflowNodes = [
         title: "Attempt two",
         state: "READY_TO_RESUME",
         tone: "normal",
-        context: { api: "Fresh Python artifact", database: "Fresh SQL migration" },
         summary: "A clean coding process receives the original inputs and completed decision set.",
         persists: ["Second clean worktree", "Prompt with owner decisions", "Second artifact digest", "Model provenance"],
         facts: {
@@ -213,7 +203,6 @@ const workflowNodes = [
         title: "Verify outcomes",
         state: "READY_TO_RESUME",
         tone: "normal",
-        context: { api: "Compare two outcomes", database: "Compare one outcome" },
         summary: "The same observer compares every fresh outcome with the complete expected decision set.",
         persists: ["Second observation", "Expected and observed outcomes", "Coverage event for second-attempt UNMODELED"],
         facts: {
@@ -228,7 +217,6 @@ const workflowNodes = [
         title: "Verified complete",
         state: "COMPLETED",
         tone: "complete",
-        context: { api: "Both outcomes match", database: "Rollout outcome matches" },
         summary: "The run completes only when the fresh artifact matches every expected outcome.",
         persists: ["Both attempt records", "Verified decision set", "COMPLETED state"],
         facts: {
@@ -243,7 +231,6 @@ const workflowNodes = [
         title: "Run fails",
         state: "FAILED",
         tone: "failed",
-        context: { api: "Execution or behavior failure", database: "Execution or migration failure" },
         summary: "The gate records a terminal failure when execution, evidence, or verification violates the workflow contract.",
         persists: ["Failure message", "Available attempt evidence", "Artifact digest when available", "FAILED state"],
         facts: {
@@ -330,7 +317,6 @@ const appTabs = document.querySelector(".app-tabs");
 const appMain = document.querySelector(".app-main");
 const workflowScenarioTabs = document.querySelector(".workflow-example-switch");
 const workflowScenarioName = document.querySelector("#workflow-scenario-name");
-const workflowScenarioDetail = document.querySelector("#workflow-scenario-detail");
 const workflowCanvas = document.querySelector("#workflow-canvas");
 const workflowInspector = document.querySelector("#workflow-inspector");
 const walkthroughScenarioTabs = document.querySelector(".walkthrough-scenario-tabs");
@@ -382,7 +368,6 @@ function workflowNodeMarkup(node) {
         >
             <span class="workflow-node-state">${node.state}</span>
             <strong>${node.title}</strong>
-            <small>${node.context[state.scenario]}</small>
         </button>
     `;
 }
@@ -486,9 +471,6 @@ function renderWorkflow() {
     workflowScenarioName.textContent = state.scenario === "api"
         ? "Workspace export authorization"
         : "Share-link expiration";
-    workflowScenarioDetail.textContent = state.scenario === "api"
-        ? "Two independent API behavior decisions"
-        : "One database rollout decision";
     workflowScenarioTabs.querySelectorAll("[data-workflow-scenario]").forEach((button) => {
         button.setAttribute("aria-selected", String(button.dataset.workflowScenario === state.scenario));
     });
@@ -632,6 +614,16 @@ function stageHeading(status, tone, title) {
     return `<div class="stage-heading"><div>${statusPill(status, tone)}<h2>${title}</h2></div></div>`;
 }
 
+function stageActions({ back = null, next = null, terminal = false, disabled = false }) {
+    const backButton = back
+        ? `<button class="button button-secondary" type="button" data-back="${back}"><span class="button-arrow" aria-hidden="true">←</span> Back</button>`
+        : "<span></span>";
+    const forwardButton = terminal
+        ? '<button class="button button-primary" type="button" data-restart>Start over</button>'
+        : `<button class="button button-primary" type="button" data-next="${next}" ${disabled ? "disabled" : ""}>Next <span class="button-arrow" aria-hidden="true">→</span></button>`;
+    return `<div class="stage-actions">${backButton}${forwardButton}</div>`;
+}
+
 function apiBriefStage() {
     const supported = isSupportedReplay();
     const brief = supported
@@ -654,7 +646,7 @@ function apiBriefStage() {
             </article>
             <article class="content-card">${choices}</article>
         </div>
-        <div class="stage-actions"><span></span><button class="button button-primary" type="button" data-next="observe">Observe attempt one</button></div>
+        ${stageActions({ next: "observe" })}
     `;
 }
 
@@ -693,7 +685,7 @@ function apiObserveStage() {
             <div><span>Administrator access</span><strong>OWNER_ONLY</strong></div>
             <div><span>Repeated request</span><strong class="${coverageGap ? "text-warning" : ""}">${repeatOutcome}</strong></div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${coverageGap ? "gap" : "review"}">${coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
+        ${stageActions({ back: "brief", next: coverageGap ? "gap" : "review" })}
     `;
 }
 
@@ -716,7 +708,7 @@ function apiReviewStage() {
                 </article>
             </div>
             <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>The run completes after attempt one.</strong><p>No owner request or second coding attempt is required.</p></div></div>
-            <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+            ${stageActions({ back: "observe", terminal: true })}
         `;
     }
     return `
@@ -736,7 +728,7 @@ function apiReviewStage() {
             </article>
         </div>
         <div class="logic-note"><span class="logic-icon" aria-hidden="true">i</span><p>The gate aggregates both unsupported choices into one durable human pause.</p></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-next="answer">Open decision request</button></div>
+        ${stageActions({ back: "observe", next: "answer" })}
     `;
 }
 
@@ -789,7 +781,7 @@ function apiAnswerStage() {
                 ${choice("repeat", "CREATE_ANOTHER_EXPORT", "Create another export", "Return 202 and create one additional job.", state.repeat === "CREATE_ANOTHER_EXPORT")}
             </fieldset>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="review">Back</button><button class="button button-primary" type="button" data-next="verify" ${ready ? "" : "disabled"}>Start fresh attempt</button></div>
+        ${stageActions({ back: "review", next: "verify", disabled: !ready })}
     `;
 }
 
@@ -837,7 +829,7 @@ function apiVerifyStage() {
             </article>
         </div>
         <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The repeated-owner outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh artifact." : "The verified artifact can return to the wider development loop."}</p></div></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answers</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+        ${stageActions({ back: "answer", terminal: true })}
     `;
 }
 
@@ -861,7 +853,7 @@ function databaseBriefStage() {
             </article>
             <article class="content-card">${choices}</article>
         </div>
-        <div class="stage-actions"><span></span><button class="button button-primary" type="button" data-next="observe">Observe attempt one</button></div>
+        ${stageActions({ next: "observe" })}
     `;
 }
 
@@ -892,7 +884,7 @@ ${coverageGap ? "-- No default was added." : `ALTER TABLE share_links
         <div class="outcome-strip outcome-strip-single">
             <div><span>Existing-link policy</span><strong class="${coverageGap ? "text-warning" : ""}">${outcome}</strong></div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${coverageGap ? "gap" : "review"}">${coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
+        ${stageActions({ back: "brief", next: coverageGap ? "gap" : "review" })}
     `;
 }
 
@@ -909,7 +901,7 @@ function databaseReviewStage() {
                 </article>
             </div>
             <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>The run completes after attempt one.</strong><p>No owner request or second migration attempt is required.</p></div></div>
-            <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+            ${stageActions({ back: "observe", terminal: true })}
         `;
     }
     return `
@@ -923,7 +915,7 @@ function databaseReviewStage() {
             </article>
         </div>
         <div class="logic-note"><span class="logic-icon" aria-hidden="true">i</span><p>The gate pauses because the migration selected a policy that the brief didn't define.</p></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-next="answer">Open decision request</button></div>
+        ${stageActions({ back: "observe", next: "answer" })}
     `;
 }
 
@@ -939,7 +931,7 @@ function databaseAnswerStage() {
                 ${choice("expiration", "EXPIRE_EXISTING", "Expire existing links", "Existing and new links receive an expiration.", state.expiration === "EXPIRE_EXISTING")}
             </fieldset>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="review">Back</button><button class="button button-primary" type="button" data-next="verify" ${ready ? "" : "disabled"}>Start fresh attempt</button></div>
+        ${stageActions({ back: "review", next: "verify", disabled: !ready })}
     `;
 }
 
@@ -963,7 +955,7 @@ function databaseVerifyStage() {
             </article>
         </div>
         <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The existing-link outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh migration." : "The verified migration can return to the wider development loop."}</p></div></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answer</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+        ${stageActions({ back: "answer", terminal: true })}
     `;
 }
 
@@ -1001,7 +993,7 @@ function gapStage() {
                 <div class="route-node route-later"><span>3</span><div><strong>Platform review happens later</strong><p>Coverage can change only through a separate engineering process.</p></div></div>
             </div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+        ${stageActions({ back: "observe", terminal: true })}
     `;
 }
 
