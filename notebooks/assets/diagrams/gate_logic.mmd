@@ -1,34 +1,39 @@
 flowchart TD
-    observed[Observer returns normalized outcomes]
-    covered{Every outcome matches approved coverage}
-    coverageGap[COVERAGE_GAP event]
-    platform[Later platform engineering review]
-    review[Review each outcome against the brief]
+    observed[Observer returns typed evidence]
+    invariants{Every invariant passes}
+    effects{Every effect has an approved disposition}
+    coverage{Every required observer rule attests}
+    unknowns{Every decision observation is recognized}
+    review[Review owner decisions against the brief]
     result{Aggregate review result}
     pause[One AWAITING_OWNER pause]
-    answered{All requested decisions answered}
-    ready[READY_TO_RESUME]
     retry[One fresh coding attempt]
-    observeAgain[Observer checks regenerated artifact]
-    verify{Every expected outcome matches}
-    completeFirst[COMPLETED]
-    failedReview[FAILED]
-    completeSecond[COMPLETED]
-    failedRetry[FAILED]
+    fullCheck[Repeat the full policy pipeline]
+    verify{Selected decisions match}
+    gap[COVERAGE_GAP]
+    failed[FAILED]
+    complete[COMPLETED]
+    platform[Platform engineering review]
 
-    observed --> covered
-    covered -->|No| coverageGap
-    coverageGap -.-> platform
-    covered -->|Yes| review
+    observed --> invariants
+    invariants -->|No| failed
+    invariants -->|Yes| effects
+    effects -->|Forbidden| failed
+    effects -->|Unclassified| gap
+    effects -->|Approved| coverage
+    coverage -->|Missing| gap
+    coverage -->|Complete| unknowns
+    unknowns -->|Unknown| gap
+    unknowns -->|Recognized| review
     review --> result
-    result -->|Contradicted| failedReview
-    result -->|All supported| completeFirst
-    result -->|Answers required| pause
-    pause --> answered
-    answered -->|No| pause
-    answered -->|Yes| ready
-    ready --> retry
-    retry --> observeAgain
-    observeAgain --> verify
-    verify -->|Yes| completeSecond
-    verify -->|No| failedRetry
+    result -->|Contradicted| failed
+    result -->|All supported| complete
+    result -->|Owner answer required| pause
+    pause --> retry
+    retry --> fullCheck
+    fullCheck -->|Failure| failed
+    fullCheck -->|Gap| gap
+    fullCheck -->|Pass| verify
+    verify -->|Yes| complete
+    verify -->|No| failed
+    gap -.-> platform

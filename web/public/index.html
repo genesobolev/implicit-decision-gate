@@ -78,12 +78,10 @@
                 <div class="demo-shell">
                     <div class="demo-toolbar">
                         <strong id="scenario-name">Workspace export authorization</strong>
-                        <div class="replay-route-switch" role="group" aria-label="Replay route">
-                            <button type="button" data-replay-route="owner" aria-pressed="true">Owner decision</button>
-                            <button type="button" data-replay-route="supported" aria-pressed="false">All supported</button>
-                            <button type="button" data-replay-route="gap" aria-pressed="false">Coverage gap</button>
-                            <button type="button" data-replay-route="verification_failure" aria-pressed="false">Verification failure</button>
-                        </div>
+                        <label class="case-picker" for="case-select">
+                            Replay
+                            <select id="case-select" aria-label="Replay case"></select>
+                        </label>
                     </div>
 
                     <div class="stage-rail" id="stage-rail" aria-label="Run stages"></div>

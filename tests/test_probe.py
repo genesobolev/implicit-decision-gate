@@ -16,6 +16,7 @@ from implicit_decision_gate.probe import (
     PostgresProbe,
     normalize_observation,
 )
+from implicit_decision_gate.scenario import CoverageStatus, InvariantStatus
 from tests.conftest import SCHEMA
 
 PRESERVE_MIGRATION = """
@@ -68,7 +69,11 @@ def test_normalize_maps_both_reference_behaviors(
             migration_time=migration_time,
         )
     )
-    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
+    assert {decision.decision_id: decision.option_id for decision in result.decisions} == {
+        EXISTING_LINK_ROLLOUT: expected
+    }
+    assert all(invariant.status is InvariantStatus.PASSED for invariant in result.invariants)
+    assert len(result.coverage) == 3
 
 
 @pytest.mark.skipif(not postgres_available(), reason="PostgreSQL 17 probe container is not running")
@@ -84,7 +89,12 @@ def test_postgres_probe_maps_reference_migrations(
     expected: str,
 ) -> None:
     result = PostgresProbe(COMPOSE_ADMIN_DSN).observe(migration, SCHEMA)
-    assert result.outcomes == {EXISTING_LINK_ROLLOUT: expected}
+    assert {decision.decision_id: decision.option_id for decision in result.decisions} == {
+        EXISTING_LINK_ROLLOUT: expected
+    }
+    assert all(invariant.status is InvariantStatus.PASSED for invariant in result.invariants)
+    assert len(result.coverage) == 7
+    assert all(item.status is CoverageStatus.PASSED for item in result.coverage)
     assert result.facts["rollback_verified"] is True
     assert result.facts["insert_without_value"] == "approximately_now_plus_30_days"
     assert {

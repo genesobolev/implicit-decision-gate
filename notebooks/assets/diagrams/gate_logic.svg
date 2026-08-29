@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="650" viewBox="0 0 1280 650" role="img" aria-labelledby="title description">
+  <title id="title">Typed gate policy flow</title>
+  <desc id="description">The gate evaluates invariants, effect policy, coverage, and decisions before repeating every check on a clean retry.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6b7280"/></marker>
+    <style>
+      .box { fill: #fff; stroke: #9eb7e3; stroke-width: 2; rx: 12; }
+      .gap { fill: #f8f5ff; stroke: #7c55c7; }
+      .fail { fill: #fff6f5; stroke: #b83f37; }
+      .done { fill: #f0faf6; stroke: #198754; }
+      .owner { fill: #fffaf0; stroke: #b36a00; }
+      .title { font: 700 17px system-ui, sans-serif; fill: #17325c; text-anchor: middle; }
+      .copy { font: 13px system-ui, sans-serif; fill: #5e687a; text-anchor: middle; }
+      .edge { stroke: #6b7280; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .label { font: 700 12px system-ui, sans-serif; fill: #4b5563; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="1280" height="650" fill="#fbfcff"/>
+  <text x="640" y="42" class="title" style="font-size:24px">Every attempt follows the same typed policy pipeline</text>
+  <g transform="translate(35 120)"><rect class="box" width="180" height="105"/><text x="90" y="38" class="title">Observe</text><text x="90" y="64" class="copy">Typed evidence</text><text x="90" y="84" class="copy">from declared rules</text></g>
+  <g transform="translate(245 120)"><rect class="box fail" width="180" height="105"/><text x="90" y="38" class="title">Invariants</text><text x="90" y="64" class="copy">Violation</text><text x="90" y="84" class="copy">becomes FAILED</text></g>
+  <g transform="translate(455 120)"><rect class="box gap" width="180" height="105"/><text x="90" y="38" class="title">Effect policy</text><text x="90" y="64" class="copy">Forbidden fails</text><text x="90" y="84" class="copy">Unclassified gaps</text></g>
+  <g transform="translate(665 120)"><rect class="box gap" width="180" height="105"/><text x="90" y="38" class="title">Coverage</text><text x="90" y="64" class="copy">Missing attestation</text><text x="90" y="84" class="copy">becomes a gap</text></g>
+  <g transform="translate(875 120)"><rect class="box owner" width="180" height="105"/><text x="90" y="38" class="title">Decisions</text><text x="90" y="64" class="copy">Review only</text><text x="90" y="84" class="copy">owner options</text></g>
+  <path class="edge" d="M215 172 H238"/><path class="edge" d="M425 172 H448"/><path class="edge" d="M635 172 H658"/><path class="edge" d="M845 172 H868"/>
+  <g transform="translate(875 315)"><rect class="box owner" width="180" height="105"/><text x="90" y="38" class="title">Owner pause</text><text x="90" y="64" class="copy">Complete only</text><text x="90" y="84" class="copy">missing intent</text></g>
+  <g transform="translate(665 315)"><rect class="box" width="180" height="105"/><text x="90" y="38" class="title">Clean retry</text><text x="90" y="64" class="copy">Fresh process</text><text x="90" y="84" class="copy">at pinned commit</text></g>
+  <g transform="translate(455 315)"><rect class="box" width="180" height="105"/><text x="90" y="38" class="title">Full recheck</text><text x="90" y="64" class="copy">All four policy</text><text x="90" y="84" class="copy">surfaces run again</text></g>
+  <g transform="translate(245 315)"><rect class="box done" width="180" height="105"/><text x="90" y="38" class="title">Exact verify</text><text x="90" y="64" class="copy">Selected decisions</text><text x="90" y="84" class="copy">must match</text></g>
+  <path class="edge" d="M965 225 V308"/><path class="edge" d="M875 367 H852"/><path class="edge" d="M665 367 H642"/><path class="edge" d="M455 367 H432"/>
+  <g transform="translate(140 500)"><rect class="box fail" width="240" height="85"/><text x="120" y="35" class="title">FAILED</text><text x="120" y="60" class="copy">Invariant, forbidden effect, mismatch</text></g>
+  <g transform="translate(520 500)"><rect class="box gap" width="240" height="85"/><text x="120" y="35" class="title">COVERAGE_GAP</text><text x="120" y="60" class="copy">Unknown effect or missing evidence</text></g>
+  <g transform="translate(900 500)"><rect class="box done" width="240" height="85"/><text x="120" y="35" class="title">COMPLETED</text><text x="120" y="60" class="copy">Policy passes and choices match</text></g>
+  <path class="edge" d="M335 420 V493"/><path class="edge" d="M545 420 Q545 460 640 493"/><path class="edge" d="M425 357 Q780 455 1018 493"/>
+</svg>

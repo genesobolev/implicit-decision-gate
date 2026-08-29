@@ -28,7 +28,7 @@ packages = ["src/implicit_decision_gate"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "notebooks/walkthrough_helpers.py", "scripts"]
 
 [[tool.mypy.overrides]]
 module = "psycopg.*"

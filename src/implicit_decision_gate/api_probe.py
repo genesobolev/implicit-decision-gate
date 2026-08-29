@@ -5,11 +5,22 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
+from implicit_decision_gate.policy import coverage_evidence_digest
+from implicit_decision_gate.scenario import (
+    CoverageResult,
+    CoverageStatus,
+    DecisionObservation,
+    FactValue,
+    InvariantResult,
+    InvariantStatus,
+    ObservationResult,
+    UnknownEffect,
+)
 
 OWNER_ONLY = "OWNER_ONLY"
 OWNER_AND_ADMIN = "OWNER_AND_ADMIN"
@@ -17,6 +28,14 @@ CREATE_ANOTHER_EXPORT = "CREATE_ANOTHER_EXPORT"
 REUSE_ACTIVE_EXPORT = "REUSE_ACTIVE_EXPORT"
 ADMINISTRATOR_ACCESS = "workspace_export_administrator_access"
 REPEAT_REQUEST = "workspace_export_repeat_request"
+OWNER_FIRST_REQUEST_INVARIANT = "workspace_export_owner_first_request"
+MEMBER_DENIAL_INVARIANT = "workspace_export_member_denial"
+API_OWNER_COVERAGE = "api.owner_first_request"
+API_MEMBER_COVERAGE = "api.member_denial"
+API_ADMINISTRATOR_COVERAGE = "api.administrator_access"
+API_REPEAT_COVERAGE = "api.owner_repeat_request"
+API_OBSERVER_ID = "docker_authorization_probe"
+API_OBSERVER_VERSION = "1"
 PYTHON_IMAGE = "python:3.12-alpine"
 PROBE_TIMEOUT_SECONDS = 60
 CONTAINER_TIMEOUT_SECONDS = 30
@@ -74,40 +93,131 @@ class AuthorizationObservation:
 
 
 def normalize_authorization(observation: AuthorizationObservation) -> ObservationResult:
-    """Map authorization and repeated-request behavior to supported policies."""
+    """Separate required behavior, modeled choices, and unknown effects."""
 
-    administrator_outcome = UNMODELED_OUTCOME
-    repeat_outcome = UNMODELED_OUTCOME
     first_owner_matches = observation.owner == RoleResult(status=202, jobs_created=1)
-    if first_owner_matches:
-        if observation.repeat_owner == RoleResult(status=202, jobs_created=1):
-            repeat_outcome = CREATE_ANOTHER_EXPORT
-        elif observation.repeat_owner == RoleResult(status=202, jobs_created=0):
-            repeat_outcome = REUSE_ACTIVE_EXPORT
-
     member_matches = observation.member == RoleResult(status=403, jobs_created=0)
-    if first_owner_matches and member_matches:
-        if observation.administrator == RoleResult(status=403, jobs_created=0):
-            administrator_outcome = OWNER_ONLY
-        elif observation.administrator == RoleResult(status=202, jobs_created=1):
-            administrator_outcome = OWNER_AND_ADMIN
+    facts: dict[str, FactValue] = {
+        "owner_status": observation.owner.status,
+        "owner_jobs_created": observation.owner.jobs_created,
+        "repeat_owner_status": observation.repeat_owner.status,
+        "repeat_owner_jobs_created": observation.repeat_owner.jobs_created,
+        "administrator_status": observation.administrator.status,
+        "administrator_jobs_created": observation.administrator.jobs_created,
+        "member_status": observation.member.status,
+        "member_jobs_created": observation.member.jobs_created,
+    }
+    owner_evidence = {
+        "status": observation.owner.status,
+        "jobs_created": observation.owner.jobs_created,
+    }
+    member_evidence = {
+        "status": observation.member.status,
+        "jobs_created": observation.member.jobs_created,
+    }
+    administrator_evidence = {
+        "status": observation.administrator.status,
+        "jobs_created": observation.administrator.jobs_created,
+    }
+    repeat_evidence = {
+        "status": observation.repeat_owner.status,
+        "jobs_created": observation.repeat_owner.jobs_created,
+    }
+    decisions: list[DecisionObservation] = []
+    unknown_effects: list[UnknownEffect] = []
+    if observation.administrator == RoleResult(status=403, jobs_created=0):
+        decisions.append(
+            DecisionObservation(
+                decision_id=ADMINISTRATOR_ACCESS,
+                option_id=OWNER_ONLY,
+                evidence=administrator_evidence,
+            )
+        )
+    elif observation.administrator == RoleResult(status=202, jobs_created=1):
+        decisions.append(
+            DecisionObservation(
+                decision_id=ADMINISTRATOR_ACCESS,
+                option_id=OWNER_AND_ADMIN,
+                evidence=administrator_evidence,
+            )
+        )
+    else:
+        unknown_effects.append(
+            UnknownEffect(
+                surface_id="workspace_export_api",
+                rule_id=API_ADMINISTRATOR_COVERAGE,
+                decision_id=ADMINISTRATOR_ACCESS,
+                description="Administrator behavior is outside the approved decision vocabulary.",
+                evidence=administrator_evidence,
+            )
+        )
+
+    if observation.repeat_owner == RoleResult(status=202, jobs_created=1):
+        decisions.append(
+            DecisionObservation(
+                decision_id=REPEAT_REQUEST,
+                option_id=CREATE_ANOTHER_EXPORT,
+                evidence=repeat_evidence,
+            )
+        )
+    elif observation.repeat_owner == RoleResult(status=202, jobs_created=0):
+        decisions.append(
+            DecisionObservation(
+                decision_id=REPEAT_REQUEST,
+                option_id=REUSE_ACTIVE_EXPORT,
+                evidence=repeat_evidence,
+            )
+        )
+    else:
+        unknown_effects.append(
+            UnknownEffect(
+                surface_id="workspace_export_api",
+                rule_id=API_REPEAT_COVERAGE,
+                decision_id=REPEAT_REQUEST,
+                description="Repeated-owner behavior is outside the approved decision vocabulary.",
+                evidence=repeat_evidence,
+            )
+        )
 
     return ObservationResult(
-        outcomes={
-            ADMINISTRATOR_ACCESS: administrator_outcome,
-            REPEAT_REQUEST: repeat_outcome,
-        },
-        facts={
-            "owner_status": observation.owner.status,
-            "owner_jobs_created": observation.owner.jobs_created,
-            "repeat_owner_status": observation.repeat_owner.status,
-            "repeat_owner_jobs_created": observation.repeat_owner.jobs_created,
-            "administrator_status": observation.administrator.status,
-            "administrator_jobs_created": observation.administrator.jobs_created,
-            "member_status": observation.member.status,
-            "member_jobs_created": observation.member.jobs_created,
-        },
+        invariants=[
+            InvariantResult(
+                invariant_id=OWNER_FIRST_REQUEST_INVARIANT,
+                expected="Return 202 and create exactly one export job.",
+                observed=_role_description(observation.owner),
+                status=InvariantStatus.PASSED if first_owner_matches else InvariantStatus.VIOLATED,
+                evidence=owner_evidence,
+            ),
+            InvariantResult(
+                invariant_id=MEMBER_DENIAL_INVARIANT,
+                expected="Return 403 and create no export job.",
+                observed=_role_description(observation.member),
+                status=InvariantStatus.PASSED if member_matches else InvariantStatus.VIOLATED,
+                evidence=member_evidence,
+            ),
+        ],
+        decisions=decisions,
+        unknown_effects=unknown_effects,
+        facts=facts,
+        coverage=[
+            _coverage_result(API_OWNER_COVERAGE, owner_evidence),
+            _coverage_result(API_MEMBER_COVERAGE, member_evidence),
+            _coverage_result(API_ADMINISTRATOR_COVERAGE, administrator_evidence),
+            _coverage_result(API_REPEAT_COVERAGE, repeat_evidence),
+        ],
     )
+
+
+def _coverage_result(rule_id: str, evidence: Mapping[str, FactValue]) -> CoverageResult:
+    return CoverageResult(
+        rule_id=rule_id,
+        status=CoverageStatus.PASSED,
+        evidence_digest=coverage_evidence_digest(evidence),
+    )
+
+
+def _role_description(result: RoleResult) -> str:
+    return f"Returned {result.status} and created {result.jobs_created} export jobs."
 
 
 class DockerAuthorizationProbe:

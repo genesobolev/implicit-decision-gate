@@ -3,33 +3,34 @@ sequenceDiagram
     participant G as Gate orchestrator
     participant S as Durable run store
     participant C1 as Codex attempt one
-    participant P as Behavior observer
+    participant P as Typed observer
     participant R as Evidence reviewer
     participant C2 as Codex attempt two
 
     O->>G: Supply authoritative brief
+    G->>S: Pin policy snapshot and digest
     G->>C1: Send first coding prompt
-    C1-->>G: Return generated handler
-    G->>P: Execute handler calls
-    P-->>G: Return normalized outcomes
-    G->>S: Persist attempt and observation
-    alt Every outcome has approved coverage
-        loop Each observed outcome
-            G->>R: Send brief and observed behavior
+    C1-->>G: Return generated artifact
+    G->>P: Execute declared observer rules
+    P-->>G: Return invariants decisions effects and coverage
+    G->>S: Persist attempt evidence
+    alt Invariant violated or effect forbidden
+        G->>S: Persist typed failure
+        G-->>O: Return FAILED
+    else Unknown effect or missing coverage
+        G->>S: Persist typed coverage gap
+        G-->>O: Stop for platform review
+    else Policy evaluation passes
+        loop Each owner decision
+            G->>R: Send brief and observed option
             R-->>G: Return evidence classification
         end
-        G-->>O: Pause with two decision requests
-        O->>G: Record administrator answer
-        G-->>O: Remain paused with one request
-        O->>G: Record repeated request answer
-        G->>C2: Send fresh prompt with both answers
-        C2-->>G: Return regenerated handler
-        G->>P: Execute the same handler calls
-        P-->>G: Return regenerated outcomes
-        G->>G: Compare every expected outcome
-        G-->>O: Return COMPLETED or FAILED
-    else Any outcome is unmodeled
-        G->>S: Mark run as COVERAGE_GAP
-        Note over S: Available for later platform engineering review
-        G-->>O: Stop without product decision or retry
+        G-->>O: Pause with decision requests
+        O->>G: Record typed owner answers
+        G->>C2: Send fresh prompt with completed intent
+        C2-->>G: Return regenerated artifact
+        G->>P: Execute every observer rule again
+        P-->>G: Return full attempt two evidence
+        G->>G: Evaluate all policy surfaces and exact decisions
+        G-->>O: Return COMPLETED FAILED or COVERAGE_GAP
     end

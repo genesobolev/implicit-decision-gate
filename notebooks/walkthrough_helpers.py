@@ -21,7 +21,7 @@ from implicit_decision_gate.api_probe import (
     REUSE_ACTIVE_EXPORT,
     DockerAuthorizationProbe,
 )
-from implicit_decision_gate.gate import ModelInvocationRecord, ModelRole, RunState
+from implicit_decision_gate.gate import ModelInvocationRecord, ModelRole, RunRecord, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.postgres_surface import (
     DATA_INTEGRITY,
@@ -37,11 +37,16 @@ from implicit_decision_gate.probe import (
     PRESERVE_EXISTING,
     PostgresProbe,
 )
-from implicit_decision_gate.scenario import EffectChange, ObservedEffect
+from implicit_decision_gate.scenario import (
+    EffectChange,
+    ObservationResult,
+    ObservedEffect,
+)
 from implicit_decision_gate.scenarios import (
     WORKSPACE_EXPORT_AUTHORIZATION,
     scenario_registry,
 )
+from implicit_decision_gate.web_export import DemoDataset
 
 WORKSPACE_EXPORT_BRIEF_PATH = "examples/workspace-export-authorization/brief.md"
 SHARE_LINK_SCHEMA_PATH = "examples/share-link-expiration/schema.sql"
@@ -169,11 +174,11 @@ def read_at_head(repo_root: Path, path: str) -> str:
     ).stdout
 
 
-def load_run(repo_root: Path, run_id: str) -> JsonObject:
+def load_run(repo_root: Path, run_id: str) -> RunRecord:
     """Load one persisted run snapshot."""
 
     path = repo_root / ".idg" / "runs" / run_id / "run.json"
-    return cast(JsonObject, json.loads(path.read_text(encoding="utf-8")))
+    return RunRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def show_markdown(value: str) -> None:
@@ -208,11 +213,11 @@ def start_live_workspace_export(repo_root: Path) -> JsonObject:
         if not gaps:
             raise RuntimeError("COVERAGE_GAP returned without a persisted event")
         show_table(
-            ("Coverage gap", "Observed outcome", "Normalized facts"),
+            ("Coverage gap", "Rule", "Normalized facts"),
             [
                 (
-                    DECISION_NAMES.get(str(gap["decision_id"]), str(gap["decision_id"])),
-                    f"`{gap['observed']}`",
+                    str(gap["description"]),
+                    f"`{gap['rule_id']}`",
                     _format_facts(cast(JsonObject, gap["facts"])),
                 )
                 for gap in gaps
@@ -308,12 +313,13 @@ def resume_live_workspace_export(repo_root: Path, run: JsonObject) -> None:
     if summary["state"] != RunState.COMPLETED:
         raise RuntimeError(str(summary["error"] or "Verification failed"))
     snapshot = load_run(repo_root, str(run["run_id"]))
-    attempts = cast(list[JsonObject], snapshot["attempts"])
-    first = cast(JsonObject, cast(JsonObject, attempts[0]["observation"])["outcomes"])
-    second = cast(JsonObject, cast(JsonObject, attempts[1]["observation"])["outcomes"])
+    attempts = snapshot.attempts
+    if len(attempts) != 2 or any(attempt.observation is None for attempt in attempts):
+        raise RuntimeError("Completed run doesn't contain two observations")
+    first = _decision_map(cast(ObservationResult, attempts[0].observation))
+    second = _decision_map(cast(ObservationResult, attempts[1].observation))
     selected = {
-        str(item["decision_id"]): str(item["selected"])
-        for item in cast(list[JsonObject], snapshot["decisions"])
+        item.decision_id: item.selected for item in snapshot.decisions if item.selected is not None
     }
     requests = cast(dict[str, JsonObject], run["_requests"])
     rows: TableRows = []
@@ -331,8 +337,8 @@ def resume_live_workspace_export(repo_root: Path, run: JsonObject) -> None:
         ("Decision", "First attempt", "Owner selected", "Second attempt", "Result"),
         rows,
     )
-    clean_retry = bool(attempts[1]["clean_start_verified"]) and (
-        attempts[0]["worktree_path"] != attempts[1]["worktree_path"]
+    clean_retry = attempts[1].clean_start_verified and (
+        attempts[0].worktree_path != attempts[1].worktree_path
     )
     show_table(
         ("Measure", "Result"),
@@ -341,7 +347,7 @@ def resume_live_workspace_export(repo_root: Path, run: JsonObject) -> None:
             ("Human answers recorded", str(len(selected))),
             ("Clean retries performed", "1" if clean_retry else "0"),
             (
-                "Verified outcomes",
+                "Verified decisions",
                 f"{sum(selected[key] == second[key] for key in DECISION_ORDER)} of 2",
             ),
             ("Final state", f"`{summary['state']}`"),
@@ -363,8 +369,9 @@ def workspace_export_examples() -> TableRows:
     for administrator, repeat in combinations:
         observation = probe.observe(_workspace_export_artifact(administrator, repeat), "")
         expected = {ADMINISTRATOR_ACCESS: administrator, REPEAT_REQUEST: repeat}
-        if observation.outcomes != expected:
-            raise RuntimeError(f"API observer returned {observation.outcomes}, expected {expected}")
+        observed = _decision_map(observation)
+        if observed != expected:
+            raise RuntimeError(f"API observer returned {observed}, expected {expected}")
         rows.append(
             (
                 ADMINISTRATOR_LABELS[administrator],
@@ -407,15 +414,21 @@ def create_export(role: str, export_jobs: list[str]) -> int:
     reviews = sum(
         invocation.role is ModelRole.EVIDENCE_REVIEWER for invocation in run.model_invocations
     )
+    observed = _decision_map(observation)
+    unknown = next(
+        (effect for effect in observation.unknown_effects if effect.decision_id == REPEAT_REQUEST),
+        None,
+    )
+    if unknown is None:
+        raise RuntimeError("Coverage-gap route didn't persist its unknown effect")
     return [
         (
             "Administrator access",
-            f"Covered as owners only (`{observation.outcomes[ADMINISTRATOR_ACCESS]}`)",
+            f"Covered as owners only (`{observed[ADMINISTRATOR_ACCESS]}`)",
         ),
         (
             "Repeated owner request",
-            "Returned OK (`200`) without a new job, outside the approved vocabulary "
-            f"(`{observation.outcomes[REPEAT_REQUEST]}`)",
+            f"Unknown effect: {unknown.description} (`{unknown.rule_id}`)",
         ),
         ("Gate state", f"`{run.state}`"),
         ("Persisted platform events", str(len(run.coverage_gaps))),
@@ -443,7 +456,7 @@ def postgres_behavior_examples(repo_root: Path) -> TableRows:
     signatures: list[list[str]] = []
     for policy, existing, migration, expected in examples:
         observation = PostgresProbe(COMPOSE_ADMIN_DSN).observe(migration, schema)
-        if observation.outcomes != {EXISTING_LINK_ROLLOUT: expected}:
+        if _decision_map(observation) != {EXISTING_LINK_ROLLOUT: expected}:
             raise RuntimeError(f"PostgreSQL observer didn't report {expected}")
         if not observation.facts["rollback_verified"]:
             raise RuntimeError("PostgreSQL observer didn't verify rollback")
@@ -516,8 +529,54 @@ def postgres_structure_examples() -> TableRows:
     ]
 
 
+def adversarial_route_examples(repo_root: Path) -> TableRows:
+    """Load the web replay fixture through the shared typed presentation contract."""
+
+    path = repo_root / "web" / "public" / "demo-runs.json"
+    dataset = DemoDataset.model_validate_json(path.read_text(encoding="utf-8"))
+    rows: TableRows = []
+    for run in dataset.runs:
+        if run.id in {"api-owner-decision", "api-supported", "db-owner-decision"}:
+            continue
+        terminal = (
+            run.failure.category
+            if run.failure is not None
+            else run.coverage_gaps[0].category
+            if run.coverage_gaps
+            else run.state
+        )
+        rows.append((run.label, str(terminal), f"`{run.state}`", run.summary))
+    return rows
+
+
 def _format_facts(facts: Mapping[str, Any]) -> str:
     return "<br>".join(f"`{key}={json.dumps(value)}`" for key, value in facts.items())
+
+
+def observation_assessment(observation: ObservationResult) -> TableRows:
+    """Summarize the four gate surfaces from one typed observation."""
+
+    decisions = (
+        ", ".join(f"`{item.decision_id}={item.option_id}`" for item in observation.decisions)
+        or "None"
+    )
+    unknowns = ", ".join(f"`{item.rule_id}`" for item in observation.unknown_effects) or "None"
+    return [
+        (
+            "Authoritative invariants",
+            "<br>".join(f"`{item.invariant_id}`: {item.status}" for item in observation.invariants),
+        ),
+        ("Owner-selectable decisions", decisions),
+        ("Unknown effects", unknowns),
+        (
+            "Coverage attestations",
+            "<br>".join(f"`{item.rule_id}`: {item.status}" for item in observation.coverage),
+        ),
+    ]
+
+
+def _decision_map(observation: ObservationResult) -> dict[str, str]:
+    return {item.decision_id: item.option_id for item in observation.decisions}
 
 
 def _option(request: JsonObject, option_id: str) -> JsonObject:
