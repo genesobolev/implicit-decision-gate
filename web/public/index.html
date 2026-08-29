@@ -75,7 +75,7 @@
                 <div class="view-header">
                     <div>
                         <h1>Walk through an implicit decision</h1>
-                        <p>Follow a deterministic example from observed behavior through human input and verification.</p>
+                        <p>Replay representative routes through evidence review, owner decisions, coverage gaps, and verification.</p>
                     </div>
                     <div class="scenario-tabs walkthrough-scenario-tabs" role="tablist" aria-label="Walkthrough example">
                         <button type="button" role="tab" data-scenario="api" aria-selected="true">API example</button>
@@ -87,14 +87,18 @@
                     <div class="demo-toolbar">
                         <div>
                             <strong id="scenario-name">Workspace export authorization</strong>
+                            <span id="replay-route-summary">Owner decision and verified completion</span>
                         </div>
-                        <button class="mode-toggle" id="coverage-gap-toggle" type="button" aria-pressed="false">
-                            <span class="toggle-track" aria-hidden="true"><span></span></span>
-                            Show unmodeled outcome
-                        </button>
+                        <div class="replay-route-switch" role="group" aria-label="Replay route">
+                            <button type="button" data-replay-route="owner" aria-pressed="true">Owner decision</button>
+                            <button type="button" data-replay-route="supported" aria-pressed="false">All supported</button>
+                            <button type="button" data-replay-route="gap" aria-pressed="false">Coverage gap</button>
+                            <button type="button" data-replay-route="verification_failure" aria-pressed="false">Verification failure</button>
+                        </div>
                     </div>
 
                     <div class="stage-rail" id="stage-rail" aria-label="Run stages"></div>
+                    <div class="replay-path" id="replay-path" role="region" aria-label="Graph route for selected replay"></div>
                     <div class="stage-content" id="stage-content" aria-live="polite"></div>
                 </div>
             </section>

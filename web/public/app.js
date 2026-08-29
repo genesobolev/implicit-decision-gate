@@ -14,12 +14,41 @@ const gapSteps = [
     { id: "gap", label: "Coverage gap" },
 ];
 
+const supportedSteps = [
+    { id: "brief", label: "Brief" },
+    { id: "observe", label: "Observe" },
+    { id: "review", label: "Review complete" },
+];
+
+const replayRoutes = {
+    owner: {
+        summary: "Owner decision and verified completion",
+        steps: normalSteps,
+        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "completed_verified"],
+    },
+    supported: {
+        summary: "Evidence-supported completion after attempt one",
+        steps: supportedSteps,
+        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "completed_first"],
+    },
+    gap: {
+        summary: "Unmodeled observation stops the product run",
+        steps: gapSteps,
+        nodes: ["started", "attempt1", "observe1", "outcomes", "coverage_gap"],
+    },
+    verification_failure: {
+        summary: "Fresh attempt fails exact verification",
+        steps: normalSteps,
+        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "failed"],
+    },
+};
+
 const state = {
     view: "workflow",
     scenario: "api",
     workflowNode: "started",
     step: "brief",
-    coverageGap: false,
+    replayRoute: "owner",
     administrator: null,
     repeat: null,
     expiration: null,
@@ -306,9 +335,11 @@ const workflowCanvas = document.querySelector("#workflow-canvas");
 const workflowInspector = document.querySelector("#workflow-inspector");
 const walkthroughScenarioTabs = document.querySelector(".walkthrough-scenario-tabs");
 const scenarioName = document.querySelector("#scenario-name");
+const replayRouteSummary = document.querySelector("#replay-route-summary");
+const replayRouteTabs = document.querySelector(".replay-route-switch");
+const replayPath = document.querySelector("#replay-path");
 const stageRail = document.querySelector("#stage-rail");
 const stageContent = document.querySelector("#stage-content");
-const gapToggle = document.querySelector("#coverage-gap-toggle");
 
 function statusPill(label, tone = "neutral") {
     return `<span class="status-pill status-${tone}"><span aria-hidden="true"></span>${label}</span>`;
@@ -399,7 +430,6 @@ function renderWorkflowInspector() {
                     ${statusPill(node.state, workflowStatusTone(node.tone))}
                     <h2>${node.title}</h2>
                 </div>
-                <strong class="workflow-inspector-context">${node.context[state.scenario]}</strong>
                 <p>${node.summary}</p>
             </div>
             <span class="workflow-example-label">${exampleLabel}</span>
@@ -470,6 +500,22 @@ function hasCompleteDecisionSet() {
     return Boolean(state.administrator && state.repeat);
 }
 
+function currentReplayRoute() {
+    return replayRoutes[state.replayRoute];
+}
+
+function isCoverageGapReplay() {
+    return state.replayRoute === "gap";
+}
+
+function isSupportedReplay() {
+    return state.replayRoute === "supported";
+}
+
+function isVerificationFailureReplay() {
+    return state.replayRoute === "verification_failure";
+}
+
 function verificationHelp() {
     if (state.scenario === "database") {
         return "Choose an answer in step 4 to enable verification.";
@@ -477,12 +523,85 @@ function verificationHelp() {
     return "Choose an answer for both questions in step 4 to enable verification.";
 }
 
+function replayActiveGraphNodes() {
+    if (state.step === "brief") return ["started"];
+    if (state.step === "observe") return ["attempt1", "observe1", "outcomes"];
+    if (state.step === "review") {
+        return isSupportedReplay() ? ["review", "completed_first"] : ["review"];
+    }
+    if (state.step === "answer") {
+        return hasCompleteDecisionSet() ? ["ready"] : ["awaiting_owner"];
+    }
+    if (state.step === "gap") return ["coverage_gap"];
+    if (state.step === "verify") {
+        return ["attempt2", "verify", isVerificationFailureReplay() ? "failed" : "completed_verified"];
+    }
+    return [];
+}
+
+function replayPathCondition(fromId, toId) {
+    const route = workflowRoutes.find((candidate) => candidate.from === fromId && candidate.to === toId);
+    if (!route) return '<span class="replay-path-arrow" aria-hidden="true">→</span>';
+    const label = route.label
+        ? `<span class="replay-path-condition replay-path-condition-${route.tone}">${route.label}</span>`
+        : "";
+    return `
+        <span class="replay-path-arrow" aria-hidden="true">→</span>
+        ${label}
+        ${label ? '<span class="replay-path-arrow" aria-hidden="true">→</span>' : ""}
+    `;
+}
+
+function renderReplayPath() {
+    const route = currentReplayRoute();
+    const activeNodes = replayActiveGraphNodes();
+    const currentNodeId = activeNodes[activeNodes.length - 1];
+    const activeIndices = activeNodes.map((nodeId) => route.nodes.indexOf(nodeId)).filter((index) => index >= 0);
+    const firstActiveIndex = activeIndices.length ? Math.min(...activeIndices) : 0;
+    const path = route.nodes.map((nodeId, index) => {
+        const node = workflowNodeById(nodeId);
+        const stateClass = activeNodes.includes(nodeId)
+            ? "replay-path-node-active"
+            : index < firstActiveIndex ? "replay-path-node-complete" : "replay-path-node-upcoming";
+        const condition = index < route.nodes.length - 1
+            ? replayPathCondition(nodeId, route.nodes[index + 1])
+            : "";
+        return `
+            <span class="replay-path-node ${stateClass}" ${nodeId === currentNodeId ? 'aria-current="step"' : ""}>${node.title}</span>
+            ${condition}
+        `;
+    }).join("");
+    replayPath.innerHTML = `
+        <strong>Graph route</strong>
+        <div>${path}</div>
+    `;
+    const pathScroller = replayPath.querySelector(":scope > div");
+    const activePathNodes = pathScroller.querySelectorAll(".replay-path-node-active");
+    const activePathNode = activePathNodes[activePathNodes.length - 1];
+    if (activePathNode) {
+        pathScroller.scrollLeft = activePathNode.offsetLeft - pathScroller.offsetLeft
+            - (pathScroller.clientWidth - activePathNode.offsetWidth) / 2;
+    }
+}
+
+function renderReplayRouteControls() {
+    const route = currentReplayRoute();
+    replayRouteSummary.textContent = route.summary;
+    const routeButtons = replayRouteTabs.querySelectorAll("[data-replay-route]");
+    routeButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.replayRoute === state.replayRoute));
+    });
+    const selectedButton = replayRouteTabs.querySelector('[aria-pressed="true"]');
+    replayRouteTabs.scrollLeft = selectedButton.offsetLeft - replayRouteTabs.offsetLeft
+        - (replayRouteTabs.clientWidth - selectedButton.offsetWidth) / 2;
+}
+
 function renderRail() {
-    const steps = state.coverageGap ? gapSteps : normalSteps;
+    const steps = currentReplayRoute().steps;
     const activeIndex = steps.findIndex((step) => step.id === state.step);
     stageRail.innerHTML = steps.map((step, index) => {
         const status = index < activeIndex ? "complete" : index === activeIndex ? "active" : "upcoming";
-        const locked = !state.coverageGap && step.id === "verify" && !hasCompleteDecisionSet();
+        const locked = step.id === "verify" && !hasCompleteDecisionSet();
         const help = verificationHelp();
         return `
             <span class="stage-step-slot ${locked ? "has-tooltip" : ""}">
@@ -514,34 +633,45 @@ function stageHeading(status, tone, title) {
 }
 
 function apiBriefStage() {
+    const supported = isSupportedReplay();
+    const brief = supported
+        ? "Add workspace export creation. Workspace owners receive 202 and create one export job when none exists. Administrators and members receive 403 and create no job. Repeated owner requests return 202 and reuse the active export without creating another job."
+        : "Add workspace export creation.<br><br>When no export job exists, workspace owners must receive 202 and create one export job. Workspace members must be denied with 403 and create no export job.";
+    const choices = supported ? `
+        <div class="defined-choice">${statusPill("DEFINED", "green")}<div><strong>Administrator access</strong><p>Owners only. Administrators receive 403 and create no job.</p></div></div>
+        <div class="defined-choice">${statusPill("DEFINED", "green")}<div><strong>Repeated owner request</strong><p>Reuse the active export and return 202 without creating another job.</p></div></div>
+        <p class="card-note">Both observed choices can be evaluated directly against the brief.</p>
+    ` : `
+        <div class="open-question"><span>?</span><p>Can an administrator create an export?</p></div>
+        <div class="open-question"><span>?</span><p>What happens when an owner requests another export?</p></div>
+        <p class="card-note">The generated handler must still choose both behaviors.</p>
+    `;
     return `
-        ${stageHeading("STARTED", "neutral", "The brief defines required behavior, but leaves two choices open.")}
+        ${stageHeading("STARTED", "neutral", supported ? "The brief explicitly defines every behavior the artifact must choose." : "The brief defines required behavior, but leaves two choices open.")}
         <div class="split-grid">
             <article class="content-card brief-card">
-                <blockquote>Add workspace export creation.<br><br>When no export job exists, workspace owners must receive 202 and create one export job. Workspace members must be denied with 403 and create no export job.</blockquote>
+                <blockquote>${brief}</blockquote>
             </article>
-            <article class="content-card">
-                <div class="open-question"><span>?</span><p>Can an administrator create an export?</p></div>
-                <div class="open-question"><span>?</span><p>What happens when an owner requests another export?</p></div>
-                <p class="card-note">The generated handler must still choose both behaviors.</p>
-            </article>
+            <article class="content-card">${choices}</article>
         </div>
         <div class="stage-actions"><span></span><button class="button button-primary" type="button" data-next="observe">Observe attempt one</button></div>
     `;
 }
 
 function apiObservationRows() {
-    const repeatStatus = state.coverageGap ? "200" : "202";
+    const coverageGap = isCoverageGapReplay();
+    const repeatStatus = coverageGap ? "200" : "202";
     return `
         <div class="observation-row"><span class="role-dot owner"></span><strong>Owner, first request</strong><code>HTTP 202</code><span>+1 job</span></div>
-        <div class="observation-row ${state.coverageGap ? "row-warning" : ""}"><span class="role-dot repeat"></span><strong>Owner, repeated request</strong><code>HTTP ${repeatStatus}</code><span>+0 jobs</span></div>
+        <div class="observation-row ${coverageGap ? "row-warning" : ""}"><span class="role-dot repeat"></span><strong>Owner, repeated request</strong><code>HTTP ${repeatStatus}</code><span>+0 jobs</span></div>
         <div class="observation-row"><span class="role-dot admin"></span><strong>Administrator</strong><code>HTTP 403</code><span>+0 jobs</span></div>
         <div class="observation-row"><span class="role-dot member"></span><strong>Member</strong><code>HTTP 403</code><span>+0 jobs</span></div>
     `;
 }
 
 function apiObserveStage() {
-    const repeatOutcome = state.coverageGap ? "UNMODELED" : "REUSE_ACTIVE_EXPORT";
+    const coverageGap = isCoverageGapReplay();
+    const repeatOutcome = coverageGap ? "UNMODELED" : "REUSE_ACTIVE_EXPORT";
     return `
         ${stageHeading("OBSERVED", "blue", "The observer measures effects instead of asking the agent what it intended.")}
         <div class="split-grid split-observe">
@@ -551,7 +681,7 @@ function apiObserveStage() {
     if role != "owner":
         return 403
     if export_jobs:
-        return ${state.coverageGap ? "200" : "202"}
+        return ${coverageGap ? "200" : "202"}
     export_jobs.append("queued")
     return 202</code></pre>
             </article>
@@ -561,13 +691,34 @@ function apiObserveStage() {
         </div>
         <div class="outcome-strip">
             <div><span>Administrator access</span><strong>OWNER_ONLY</strong></div>
-            <div><span>Repeated request</span><strong class="${state.coverageGap ? "text-warning" : ""}">${repeatOutcome}</strong></div>
+            <div><span>Repeated request</span><strong class="${coverageGap ? "text-warning" : ""}">${repeatOutcome}</strong></div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${state.coverageGap ? "gap" : "review"}">${state.coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${coverageGap ? "gap" : "review"}">${coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
     `;
 }
 
 function apiReviewStage() {
+    if (isSupportedReplay()) {
+        return `
+            ${stageHeading("COMPLETED", "green", "Both observed choices are supported by explicit passages in the original brief.")}
+            <div class="decision-grid">
+                <article class="decision-card">
+                    <div class="decision-top"><span>Decision 01</span>${statusPill("SUPPORTED", "green")}</div>
+                    <h3>Administrator access</h3>
+                    <p>Observed: <code>OWNER_ONLY</code></p>
+                    <div class="evidence-box evidence-box-supported"><span>Brief evidence</span><strong>Administrators receive 403 and create no job.</strong></div>
+                </article>
+                <article class="decision-card">
+                    <div class="decision-top"><span>Decision 02</span>${statusPill("SUPPORTED", "green")}</div>
+                    <h3>Repeated owner request</h3>
+                    <p>Observed: <code>REUSE_ACTIVE_EXPORT</code></p>
+                    <div class="evidence-box evidence-box-supported"><span>Brief evidence</span><strong>Repeated owner requests reuse the active export.</strong></div>
+                </article>
+            </div>
+            <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>The run completes after attempt one.</strong><p>No owner request or second coding attempt is required.</p></div></div>
+            <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+        `;
+    }
     return `
         ${stageHeading("NOT_EVIDENCED", "amber", "Each observed choice is reviewed independently against the original brief.")}
         <div class="decision-grid">
@@ -599,10 +750,33 @@ function choice(name, value, label, detail, selected) {
     `;
 }
 
+function answerProgressMarkup() {
+    const total = state.scenario === "database" ? 1 : 2;
+    const recorded = state.scenario === "database"
+        ? Number(Boolean(state.expiration))
+        : Number(Boolean(state.administrator)) + Number(Boolean(state.repeat));
+    const ready = recorded === total;
+    const detail = ready
+        ? "The complete decision set moves the run to Ready to resume."
+        : recorded > 0
+            ? "The Partial answers route keeps the run in Request decisions until every answer is recorded."
+            : "The run remains in Request decisions until the required answers are recorded.";
+    return `
+        <div class="answer-progress">
+            <div>
+                ${statusPill(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber")}
+                <strong>${recorded} of ${total} ${total === 1 ? "answer" : "answers"} recorded</strong>
+            </div>
+            <p>${detail} Recorded answers remain attached if you inspect another step.</p>
+        </div>
+    `;
+}
+
 function apiAnswerStage() {
     const ready = hasCompleteDecisionSet();
     return `
         ${stageHeading(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber", "Answer both product questions before a fresh attempt can start.")}
+        ${answerProgressMarkup()}
         <div class="decision-grid">
             <fieldset class="choice-group">
                 <legend><span>01</span>Who can create workspace exports?</legend>
@@ -619,11 +793,36 @@ function apiAnswerStage() {
     `;
 }
 
+function verificationValues(expected, observed) {
+    return `
+        <span class="verification-values">
+            <span>Expected <code>${expected}</code></span>
+            <span>Observed <code>${observed}</code></span>
+        </span>
+    `;
+}
+
+function verificationResultSwitch() {
+    return `
+        <div class="verification-result-switch">
+            <strong>Verification result</strong>
+            <div role="group" aria-label="Verification result">
+                <button type="button" data-verification-route="owner" aria-pressed="${!isVerificationFailureReplay()}">Exact match</button>
+                <button type="button" data-verification-route="verification_failure" aria-pressed="${isVerificationFailureReplay()}">Mismatch</button>
+            </div>
+        </div>
+    `;
+}
+
 function apiVerifyStage() {
+    const failed = isVerificationFailureReplay();
     const adminAllowed = state.administrator === "OWNER_AND_ADMIN";
     const repeatCreates = state.repeat === "CREATE_ANOTHER_EXPORT";
+    const expectedRepeat = `202 / +${repeatCreates ? "1" : "0"}`;
+    const observedRepeat = failed ? `202 / +${repeatCreates ? "0" : "1"}` : expectedRepeat;
     return `
-        ${stageHeading("COMPLETED", "green", "The same observer verifies every selected outcome on one fresh result.")}
+        ${stageHeading(failed ? "FAILED" : "COMPLETED", failed ? "red" : "green", failed ? "The fresh result fails because one observed outcome doesn't match the selected decision." : "The same observer verifies every selected outcome on one fresh result.")}
+        ${verificationResultSwitch()}
         <div class="verification-layout">
             <article class="content-card">
                 <div class="contract-row"><span>Administrator access</span><strong>${state.administrator}</strong></div>
@@ -631,36 +830,45 @@ function apiVerifyStage() {
                 <div class="fresh-attempt"><span>Fresh process</span><span>Clean worktree</span><span>Original brief</span><span>Both answers</span></div>
             </article>
             <article class="content-card verification-card">
-                <div class="verify-row"><span>First owner request</span><code>202 / +1</code>${statusPill("MATCH", "green")}</div>
-                <div class="verify-row"><span>Repeated owner request</span><code>202 / +${repeatCreates ? "1" : "0"}</code>${statusPill("MATCH", "green")}</div>
-                <div class="verify-row"><span>Administrator</span><code>${adminAllowed ? "202 / +1" : "403 / +0"}</code>${statusPill("MATCH", "green")}</div>
-                <div class="verify-row"><span>Member</span><code>403 / +0</code>${statusPill("MATCH", "green")}</div>
+                <div class="verify-row"><span>First owner request</span>${verificationValues("202 / +1", "202 / +1")}${statusPill("MATCH", "green")}</div>
+                <div class="verify-row ${failed ? "verify-row-mismatch" : ""}"><span>Repeated owner request</span>${verificationValues(expectedRepeat, observedRepeat)}${statusPill(failed ? "MISMATCH" : "MATCH", failed ? "red" : "green")}</div>
+                <div class="verify-row"><span>Administrator</span>${verificationValues(adminAllowed ? "202 / +1" : "403 / +0", adminAllowed ? "202 / +1" : "403 / +0")}${statusPill("MATCH", "green")}</div>
+                <div class="verify-row"><span>Member</span>${verificationValues("403 / +0", "403 / +0")}${statusPill("MATCH", "green")}</div>
             </article>
         </div>
-        <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>Every expected outcome matches.</strong><p>The verified artifact can return to the wider development loop.</p></div></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answers</button><button class="button button-primary" type="button" data-restart>Replay from start</button></div>
+        <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The repeated-owner outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh artifact." : "The verified artifact can return to the wider development loop."}</p></div></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answers</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
     `;
 }
 
 function databaseBriefStage() {
+    const supported = isSupportedReplay();
+    const brief = supported
+        ? "Add 30-day expiration to newly created item-sharing links. Preserve existing links without an expiration."
+        : "Add 30-day expiration to newly created item-sharing links.";
+    const choices = supported ? `
+        <div class="defined-choice">${statusPill("DEFINED", "green")}<div><strong>Existing-link policy</strong><p>Existing links remain non-expiring. New links expire after 30 days.</p></div></div>
+        <p class="card-note">The observed rollout choice can be evaluated directly against the brief.</p>
+    ` : `
+        <div class="open-question"><span>?</span><p>Should existing share links remain non-expiring or receive an expiration?</p></div>
+        <p class="card-note">The migration must choose a rollout policy for existing rows.</p>
+    `;
     return `
-        ${stageHeading("STARTED", "neutral", "The brief defines expiration for new links, but not existing links.")}
+        ${stageHeading("STARTED", "neutral", supported ? "The brief defines rollout behavior for both new and existing links." : "The brief defines expiration for new links, but not existing links.")}
         <div class="split-grid">
             <article class="content-card brief-card">
-                <blockquote>Add 30-day expiration to newly created item-sharing links.</blockquote>
+                <blockquote>${brief}</blockquote>
             </article>
-            <article class="content-card">
-                <div class="open-question"><span>?</span><p>Should existing share links remain non-expiring or receive an expiration?</p></div>
-                <p class="card-note">The migration must choose a rollout policy for existing rows.</p>
-            </article>
+            <article class="content-card">${choices}</article>
         </div>
         <div class="stage-actions"><span></span><button class="button button-primary" type="button" data-next="observe">Observe attempt one</button></div>
     `;
 }
 
 function databaseObserveStage() {
-    const newExpiration = state.coverageGap ? "NULL" : "+30 days";
-    const outcome = state.coverageGap ? "UNMODELED" : "PRESERVE_EXISTING";
+    const coverageGap = isCoverageGapReplay();
+    const newExpiration = coverageGap ? "NULL" : "+30 days";
+    const outcome = coverageGap ? "UNMODELED" : "PRESERVE_EXISTING";
     return `
         ${stageHeading("OBSERVED", "blue", "The database probe measures row effects inside a rolled-back transaction.")}
         <div class="split-grid split-observe">
@@ -669,26 +877,41 @@ function databaseObserveStage() {
                 <pre><code>ALTER TABLE share_links
     ADD COLUMN expires_at timestamptz;
 
-${state.coverageGap ? "-- No default was added." : `ALTER TABLE share_links
+${coverageGap ? "-- No default was added." : `ALTER TABLE share_links
     ALTER COLUMN expires_at
     SET DEFAULT (now() + interval '30 days');`}</code></pre>
             </article>
             <article class="content-card">
                 <div class="observation-list">
                     <div class="observation-row"><span class="role-dot existing"></span><strong>Existing link</strong><code>expires_at</code><span>NULL</span></div>
-                    <div class="observation-row ${state.coverageGap ? "row-warning" : ""}"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>${newExpiration}</span></div>
+                    <div class="observation-row ${coverageGap ? "row-warning" : ""}"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>${newExpiration}</span></div>
                     <div class="observation-row"><span class="role-dot rollback"></span><strong>Probe cleanup</strong><code>transaction</code><span>rolled back</span></div>
                 </div>
             </article>
         </div>
         <div class="outcome-strip outcome-strip-single">
-            <div><span>Existing-link policy</span><strong class="${state.coverageGap ? "text-warning" : ""}">${outcome}</strong></div>
+            <div><span>Existing-link policy</span><strong class="${coverageGap ? "text-warning" : ""}">${outcome}</strong></div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${state.coverageGap ? "gap" : "review"}">${state.coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="brief">Back</button><button class="button button-primary" type="button" data-next="${coverageGap ? "gap" : "review"}">${coverageGap ? "Record coverage gap" : "Review against brief"}</button></div>
     `;
 }
 
 function databaseReviewStage() {
+    if (isSupportedReplay()) {
+        return `
+            ${stageHeading("COMPLETED", "green", "The observed rollout policy is supported by the original brief.")}
+            <div class="decision-grid decision-grid-single">
+                <article class="decision-card">
+                    <div class="decision-top"><span>Decision 01</span>${statusPill("SUPPORTED", "green")}</div>
+                    <h3>Existing share-link expiration</h3>
+                    <p>Observed: <code>PRESERVE_EXISTING</code></p>
+                    <div class="evidence-box evidence-box-supported"><span>Brief evidence</span><strong>Preserve existing links without an expiration.</strong></div>
+                </article>
+            </div>
+            <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>The run completes after attempt one.</strong><p>No owner request or second migration attempt is required.</p></div></div>
+            <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+        `;
+    }
     return `
         ${stageHeading("NOT_EVIDENCED", "amber", "The observed rollout choice isn't supported by the original brief.")}
         <div class="decision-grid decision-grid-single">
@@ -708,6 +931,7 @@ function databaseAnswerStage() {
     const ready = hasCompleteDecisionSet();
     return `
         ${stageHeading(ready ? "READY_TO_RESUME" : "AWAITING_OWNER", ready ? "green" : "amber", "Choose the policy for existing share links before a fresh attempt can start.")}
+        ${answerProgressMarkup()}
         <div class="decision-grid decision-grid-single">
             <fieldset class="choice-group">
                 <legend><span>01</span>What should happen to existing links?</legend>
@@ -720,22 +944,26 @@ function databaseAnswerStage() {
 }
 
 function databaseVerifyStage() {
+    const failed = isVerificationFailureReplay();
     const expiresExisting = state.expiration === "EXPIRE_EXISTING";
+    const expectedExisting = expiresExisting ? "+30 days" : "NULL";
+    const observedExisting = failed ? (expiresExisting ? "NULL" : "+30 days") : expectedExisting;
     return `
-        ${stageHeading("COMPLETED", "green", "The database probe verifies the selected rollout policy on a fresh migration.")}
+        ${stageHeading(failed ? "FAILED" : "COMPLETED", failed ? "red" : "green", failed ? "The fresh migration fails because its row effect doesn't match the selected rollout policy." : "The database probe verifies the selected rollout policy on a fresh migration.")}
+        ${verificationResultSwitch()}
         <div class="verification-layout">
             <article class="content-card">
                 <div class="contract-row"><span>Existing-link policy</span><strong>${state.expiration}</strong></div>
                 <div class="fresh-attempt"><span>Fresh process</span><span>Clean worktree</span><span>Original brief</span><span>Owner answer</span></div>
             </article>
             <article class="content-card verification-card">
-                <div class="verify-row"><span>Existing link</span><code>${expiresExisting ? "+30 days" : "NULL"}</code>${statusPill("MATCH", "green")}</div>
-                <div class="verify-row"><span>New link</span><code>+30 days</code>${statusPill("MATCH", "green")}</div>
-                <div class="verify-row"><span>Probe cleanup</span><code>rolled back</code>${statusPill("MATCH", "green")}</div>
+                <div class="verify-row ${failed ? "verify-row-mismatch" : ""}"><span>Existing link</span>${verificationValues(expectedExisting, observedExisting)}${statusPill(failed ? "MISMATCH" : "MATCH", failed ? "red" : "green")}</div>
+                <div class="verify-row"><span>New link</span>${verificationValues("+30 days", "+30 days")}${statusPill("MATCH", "green")}</div>
+                <div class="verify-row"><span>Probe cleanup</span>${verificationValues("rolled back", "rolled back")}${statusPill("MATCH", "green")}</div>
             </article>
         </div>
-        <div class="completion-banner"><span class="completion-check" aria-hidden="true">✓</span><div><strong>Every expected outcome matches.</strong><p>The verified migration can return to the wider development loop.</p></div></div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answer</button><button class="button button-primary" type="button" data-restart>Replay from start</button></div>
+        <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The existing-link outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh migration." : "The verified migration can return to the wider development loop."}</p></div></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="answer">Change answer</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
     `;
 }
 
@@ -773,7 +1001,82 @@ function gapStage() {
                 <div class="route-node route-later"><span>3</span><div><strong>Platform review happens later</strong><p>Coverage can change only through a separate engineering process.</p></div></div>
             </div>
         </div>
-        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay modeled path</button></div>
+        <div class="stage-actions"><button class="button button-secondary" type="button" data-back="observe">Back</button><button class="button button-primary" type="button" data-restart>Replay route from start</button></div>
+    `;
+}
+
+function stageRunRecordItems(stageId) {
+    if (stageId === "brief") {
+        return [
+            "Created a durable run with <code>STARTED</code> state",
+            "Pinned the original brief, Git commit, and scenario identifier",
+        ];
+    }
+    if (stageId === "observe") {
+        const outcomes = state.scenario === "api"
+            ? `Administrator: <code>OWNER_ONLY</code>; repeated request: <code>${isCoverageGapReplay() ? "UNMODELED" : "REUSE_ACTIVE_EXPORT"}</code>`
+            : `Existing-link policy: <code>${isCoverageGapReplay() ? "UNMODELED" : "PRESERVE_EXISTING"}</code>`;
+        return [
+            "Stored the attempt-one artifact digest and model provenance",
+            "Stored normalized facts and measured effects from the bounded observer",
+            `Recorded typed outcomes: ${outcomes}`,
+        ];
+    }
+    if (stageId === "review") {
+        if (isSupportedReplay()) {
+            return [
+                "Stored a <code>SUPPORTED</code> classification and evidence quote for every observed choice",
+                "Stored completed decision records and the attempt-one artifact digest",
+                "Set the run state to <code>COMPLETED</code>",
+            ];
+        }
+        return [
+            "Stored a <code>NOT_EVIDENCED</code> classification and reviewer provenance for each choice",
+            `Created ${state.scenario === "api" ? "two typed decision requests" : "one typed decision request"}`,
+            "Set the run state to <code>AWAITING_OWNER</code>",
+        ];
+    }
+    if (stageId === "answer") {
+        const answers = [];
+        if (state.administrator) answers.push(`Administrator access: <code>${state.administrator}</code>`);
+        if (state.repeat) answers.push(`Repeated request: <code>${state.repeat}</code>`);
+        if (state.expiration) answers.push(`Existing-link policy: <code>${state.expiration}</code>`);
+        const total = state.scenario === "database" ? 1 : 2;
+        const recorded = answers.length;
+        return [
+            recorded ? `Recorded owner ${recorded === 1 ? "answer" : "answers"} with timestamps: ${answers.join("; ")}` : "No owner answer has been recorded yet",
+            `Recorded decision progress: ${recorded} of ${total}`,
+            `Set the run state to <code>${recorded === total ? "READY_TO_RESUME" : "AWAITING_OWNER"}</code>`,
+        ];
+    }
+    if (stageId === "verify") {
+        return isVerificationFailureReplay() ? [
+            "Stored the attempt-two artifact digest and second observation",
+            "Stored the expected and observed outcome mismatch",
+            "Recorded a failure message and set the run state to <code>FAILED</code>",
+        ] : [
+            "Stored the attempt-two artifact digest and second observation",
+            "Stored the exact expected and observed outcome comparison",
+            "Stored the verified decision set and set the run state to <code>COMPLETED</code>",
+        ];
+    }
+    return [
+        "Stored the coverage-gap event with normalized facts and effects",
+        "Stored the attempt-one artifact digest, attempt number, and pinned commit",
+        "Set the run state to <code>COVERAGE_GAP</code>",
+    ];
+}
+
+function stageRunRecordDetails(stageId) {
+    const items = stageRunRecordItems(stageId).map((item) => `<li>${item}</li>`).join("");
+    return `
+        <details class="stage-run-record">
+            <summary>Run record changes</summary>
+            <div>
+                <p>Only records created or changed during this replay step are shown.</p>
+                <ul>${items}</ul>
+            </div>
+        </details>
     `;
 }
 
@@ -795,8 +1098,14 @@ function renderStage() {
         gap: gapStage,
     };
     const stages = state.scenario === "database" ? databaseStages : apiStages;
+    const validSteps = currentReplayRoute().steps.map((step) => step.id);
+    if (!validSteps.includes(state.step)) state.step = "brief";
     stageContent.innerHTML = stages[state.step]();
+    const actions = stageContent.querySelector(".stage-actions");
+    if (actions) actions.insertAdjacentHTML("beforebegin", stageRunRecordDetails(state.step));
     renderRail();
+    renderReplayPath();
+    renderReplayRouteControls();
 }
 
 function observerFlow(cards) {
@@ -1011,11 +1320,16 @@ function workflowObservationDetails(nodeId) {
 
 function resetWalkthrough() {
     state.step = "brief";
-    state.coverageGap = false;
     state.administrator = null;
     state.repeat = null;
     state.expiration = null;
-    gapToggle.setAttribute("aria-pressed", "false");
+}
+
+function setReplayRoute(routeId) {
+    if (!replayRoutes[routeId] || routeId === state.replayRoute) return;
+    state.replayRoute = routeId;
+    resetWalkthrough();
+    renderStage();
 }
 
 function setScenario(scenario) {
@@ -1083,6 +1397,14 @@ stageRail.addEventListener("click", (event) => {
 });
 
 stageContent.addEventListener("click", (event) => {
+    const verificationRoute = event.target.closest("[data-verification-route]");
+    if (verificationRoute) {
+        const routeId = verificationRoute.dataset.verificationRoute;
+        state.replayRoute = routeId;
+        renderStage();
+        stageContent.querySelector(`[data-verification-route="${routeId}"]`).focus();
+        return;
+    }
     const next = event.target.closest("[data-next]");
     const back = event.target.closest("[data-back]");
     const restart = event.target.closest("[data-restart]");
@@ -1094,20 +1416,19 @@ stageContent.addEventListener("click", (event) => {
 });
 
 stageContent.addEventListener("change", (event) => {
-    if (event.target.name === "administrator") state.administrator = event.target.value;
-    if (event.target.name === "repeat") state.repeat = event.target.value;
-    if (event.target.name === "expiration") state.expiration = event.target.value;
+    const { name, value } = event.target;
+    if (name === "administrator") state.administrator = value;
+    if (name === "repeat") state.repeat = value;
+    if (name === "expiration") state.expiration = value;
     renderStage();
+    const selectedChoice = stageContent.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (selectedChoice) selectedChoice.focus();
 });
 
-gapToggle.addEventListener("click", () => {
-    state.coverageGap = !state.coverageGap;
-    state.step = state.step === "brief" ? "brief" : "observe";
-    state.administrator = null;
-    state.repeat = null;
-    state.expiration = null;
-    gapToggle.setAttribute("aria-pressed", String(state.coverageGap));
-    renderStage();
+replayRouteTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-replay-route]");
+    if (!button) return;
+    setReplayRoute(button.dataset.replayRoute);
 });
 
 renderView();
