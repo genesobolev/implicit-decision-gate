@@ -187,13 +187,12 @@ label:has(input:focus-visible) {
     letter-spacing: -0.025em;
 }
 
-.view-header p:not(.eyebrow) {
+.view-header p {
     max-width: 720px;
     margin: 0;
     color: var(--text-soft);
 }
 
-.eyebrow,
 .toolbar-label,
 .card-label {
     margin: 0;
