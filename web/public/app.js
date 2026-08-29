@@ -458,10 +458,6 @@ function renderWorkflow() {
             <defs>${markers}</defs>
             ${edges}
         </svg>
-        <div class="workflow-canvas-note">
-            <span>How to read this graph</span>
-            <p>Follow the blue execution route. Colored branches show human input, coverage stops, completion, and failure.</p>
-        </div>
         <div class="workflow-nodes">${nodes}</div>
     `;
 
