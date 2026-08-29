@@ -116,6 +116,16 @@ The project pins each coding and evidence-review invocation to
 `xhigh` reasoning and records the invocation role, attempt number, decision identifier,
 model, reasoning effort, and Codex CLI version.
 
+## Run the web interface locally
+
+The interactive web interface is a static site. Serve it from the repository root:
+
+```bash
+uv run python -m http.server 8000 --directory web/public
+```
+
+Open [http://localhost:8000](http://localhost:8000). Press `Ctrl+C` to stop the server.
+
 ## Supported observers
 
 ### Workspace export behavior
