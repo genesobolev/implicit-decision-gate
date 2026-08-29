@@ -208,22 +208,25 @@ controlled tool access, attributable evidence, and permission enforcement.
 
 ## Guided notebook
 
-The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) presents the
-workspace-export value path: two observed decisions, one durable pause, two human answers,
-one clean retry, and direct verification of both outcomes. If a live first attempt instead
-produces an unmodeled result, the notebook displays the persisted coverage event and skips
-the product-decision and retry cells without raising an execution error. It retains the
-system-context, lifecycle, and gate-logic diagrams while hiding low-level setup details.
+The [guided notebook](notebooks/implicit-decision-gate-walkthrough.ipynb) presents one live
+workspace-export lifecycle, all four supported API behavior combinations, a deterministic
+API coverage gap, both supported PostgreSQL data behaviors, and the PostgreSQL structural
+rule matrix. If the live first attempt produces an unmodeled result, the notebook displays
+the persisted coverage event and skips that run's product-decision and retry cells without
+raising an execution error. It retains the system-context, lifecycle, and gate-logic
+diagrams while moving execution and display mechanics into one notebook helper module.
 
 Launch it from the repository root:
 
 ```bash
+docker compose up -d --wait
 uv run --with 'jupyterlab>=4.1,<5' jupyter lab \
     notebooks/implicit-decision-gate-walkthrough.ipynb
 ```
 
 JupyterLab remains demo tooling rather than a project dependency. The notebook invokes
-the live Codex CLI and Docker observer and creates a new durable run.
+the live Codex CLI, Docker observer, and disposable PostgreSQL probes and creates new
+durable runs.
 
 ## Inspect and validate
 
