@@ -22,22 +22,18 @@ const supportedSteps = [
 
 const replayRoutes = {
     owner: {
-        summary: "Owner decision and verified completion",
         steps: normalSteps,
         nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "completed_verified"],
     },
     supported: {
-        summary: "Evidence-supported completion after attempt one",
         steps: supportedSteps,
         nodes: ["started", "attempt1", "observe1", "outcomes", "review", "completed_first"],
     },
     gap: {
-        summary: "Unmodeled observation stops the product run",
         steps: gapSteps,
         nodes: ["started", "attempt1", "observe1", "outcomes", "coverage_gap"],
     },
     verification_failure: {
-        summary: "Fresh attempt fails exact verification",
         steps: normalSteps,
         nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "failed"],
     },
@@ -321,7 +317,6 @@ const workflowCanvas = document.querySelector("#workflow-canvas");
 const workflowInspector = document.querySelector("#workflow-inspector");
 const walkthroughScenarioTabs = document.querySelector(".walkthrough-scenario-tabs");
 const scenarioName = document.querySelector("#scenario-name");
-const replayRouteSummary = document.querySelector("#replay-route-summary");
 const replayRouteTabs = document.querySelector(".replay-route-switch");
 const replayPath = document.querySelector("#replay-path");
 const stageRail = document.querySelector("#stage-rail");
@@ -567,8 +562,6 @@ function renderReplayPath() {
 }
 
 function renderReplayRouteControls() {
-    const route = currentReplayRoute();
-    replayRouteSummary.textContent = route.summary;
     const routeButtons = replayRouteTabs.querySelectorAll("[data-replay-route]");
     routeButtons.forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.replayRoute === state.replayRoute));

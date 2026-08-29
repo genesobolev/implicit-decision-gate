@@ -762,19 +762,9 @@ label:has(input:focus-visible) {
     background: var(--biscuit);
 }
 
-.demo-toolbar > div {
-    display: grid;
-    gap: 2px;
-}
-
 .demo-toolbar strong {
     color: var(--intrepid-blue);
     font-size: 14px;
-}
-
-#replay-route-summary {
-    color: var(--text-faint);
-    font-size: 11px;
 }
 
 .demo-toolbar > .replay-route-switch {
