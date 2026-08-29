@@ -23,7 +23,6 @@ const state = {
     administrator: null,
     repeat: null,
     expiration: null,
-    surface: "api",
     operation: "column",
 };
 
@@ -355,8 +354,6 @@ const scenarioName = document.querySelector("#scenario-name");
 const stageRail = document.querySelector("#stage-rail");
 const stageContent = document.querySelector("#stage-content");
 const gapToggle = document.querySelector("#coverage-gap-toggle");
-const surfaceTabs = document.querySelector("#surface-tabs");
-const coverageContent = document.querySelector("#coverage-content");
 
 function statusPill(label, tone = "neutral") {
     return `<span class="status-pill status-${tone}"><span aria-hidden="true"></span>${label}</span>`;
@@ -436,6 +433,7 @@ function renderWorkflowInspector() {
                 <ul>${facts}</ul>
             </article>
         </div>
+        ${workflowObservationDetails(node.id)}
         <div class="workflow-routes">
             <h3>Possible next routes</h3>
             <div>${routes}</div>
@@ -817,39 +815,29 @@ function renderStage() {
     renderRail();
 }
 
-function apiCoverage() {
-    return `
-        <div class="coverage-flow">
-            <article class="surface-card"><span class="flow-index">01</span><h2>Generated handler</h2><p>One Python function accepts a role and shared export-job state.</p><code>create_export(role, jobs)</code></article>
-            <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card"><span class="flow-index">02</span><h2>Four bounded calls</h2><p>Owner twice with shared state, then administrator and member.</p><code>status + jobs_created</code></article>
-            <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card surface-result"><span class="flow-index">03</span><h2>Two typed outcomes</h2><p><strong>OWNER_ONLY</strong><br><strong>REUSE_ACTIVE_EXPORT</strong></p><code>ObservationResult</code></article>
-        </div>
-        <div class="surface-summary"><strong>One observer, two product decisions.</strong><span>The gate receives the same normalized result type used by every scenario.</span></div>
-    `;
+function observerFlow(cards) {
+    return `<div class="observer-flow">${cards.map((card, index) => `
+        ${index ? '<span class="observer-flow-arrow" aria-hidden="true">→</span>' : ""}
+        <article class="observer-stage ${card.result ? "observer-stage-result" : ""}">
+            <span class="observer-stage-index">0${index + 1}</span>
+            <h4>${card.title}</h4>
+            <p>${card.description}</p>
+            <code>${card.output}</code>
+        </article>
+    `).join("")}</div>`;
 }
 
-function databaseCoverage() {
-    return `
-        <div class="coverage-flow">
-            <article class="surface-card"><span class="flow-index">01</span><h2>Seed known state</h2><p>Create an existing share link before applying the migration.</p><code>expires_at = NULL</code></article>
-            <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card"><span class="flow-index">02</span><h2>Apply and probe</h2><p>Run the migration, insert a new link, inspect both rows, then roll back.</p><code>transactional probe</code></article>
-            <span class="flow-arrow" aria-hidden="true">→</span>
-            <article class="surface-card surface-result"><span class="flow-index">03</span><h2>One typed outcome</h2><p><strong>PRESERVE_EXISTING</strong></p><code>rollback_verified = true</code></article>
-        </div>
-        <div class="surface-summary"><strong>Behavior is established from database effects.</strong><span>The observer doesn't infer rollout policy from the SQL text.</span></div>
-    `;
+function observerSummary(title, detail) {
+    return `<div class="observer-summary"><strong>${title}</strong><span>${detail}</span></div>`;
 }
 
-function structureCoverage() {
+function databaseStructureExample() {
     const operation = structureOperations[state.operation];
     const operationButtons = Object.entries(structureOperations).map(([id, item]) => `
         <button type="button" data-operation="${id}" class="operation-button ${id === state.operation ? "operation-active" : ""}" aria-pressed="${id === state.operation}">${item.label}</button>
     `).join("");
     return `
-        <div class="operation-picker" aria-label="Database operation">${operationButtons}</div>
+        <div class="operation-picker" role="group" aria-label="Database operation">${operationButtons}</div>
         <div class="structure-grid">
             <article class="content-card diff-card">
                 <span class="card-label">Observed catalog change</span>
@@ -868,16 +856,175 @@ function structureCoverage() {
                 <div class="rule-set"><span class="${operation.rule === "schema_shape" ? "rule-active" : ""}">schema_shape</span><span class="${operation.rule === "data_integrity" ? "rule-active" : ""}">data_integrity</span><span class="${operation.rule === "indexing" ? "rule-active" : ""}">indexing</span></div>
             </article>
         </div>
-        <div class="surface-summary"><strong>Three rules cover many structural operations.</strong><span>New rules extend observation coverage without changing the gate lifecycle.</span></div>
     `;
 }
 
-function renderCoverage() {
-    const renderers = { api: apiCoverage, database: databaseCoverage, structure: structureCoverage };
-    coverageContent.innerHTML = renderers[state.surface]();
-    surfaceTabs.querySelectorAll("[data-surface]").forEach((button) => {
-        button.setAttribute("aria-selected", String(button.dataset.surface === state.surface));
-    });
+function observationMethodDetails() {
+    if (state.scenario === "api") {
+        const flow = observerFlow([
+            {
+                title: "Generated handler",
+                description: "One Python function accepts a role and shared export-job state.",
+                output: "create_export(role, jobs)",
+            },
+            {
+                title: "Four bounded calls",
+                description: "Call owner twice with shared state, then administrator and member.",
+                output: "status + jobs_created",
+            },
+            {
+                title: "Typed outcomes",
+                description: "Normalize the measured behavior into two independent decisions.",
+                output: "OWNER_ONLY + REUSE_ACTIVE_EXPORT",
+                result: true,
+            },
+        ]);
+        return `
+            <section class="workflow-observation" aria-label="Observation method">
+                <div class="workflow-observation-header">
+                    <div><span class="card-label">Observation method</span><h3>API behavior observer</h3></div>
+                    <p>The observer executes the generated handler in a bounded container and records effects instead of trusting the agent's explanation.</p>
+                </div>
+                ${flow}
+                ${observerSummary("One observer produces two product outcomes.", "Every scenario returns the same normalized ObservationResult shape to the gate.")}
+            </section>
+        `;
+    }
+
+    const behaviorFlow = observerFlow([
+        {
+            title: "Seed known state",
+            description: "Create an existing share link before applying the migration.",
+            output: "expires_at = NULL",
+        },
+        {
+            title: "Apply and probe",
+            description: "Run the migration, insert a new link, inspect both rows, then roll back.",
+            output: "transactional probe",
+        },
+        {
+            title: "Typed outcome",
+            description: "Normalize the measured rollout behavior for existing links.",
+            output: "PRESERVE_EXISTING",
+            result: true,
+        },
+    ]);
+    return `
+        <section class="workflow-observation" aria-label="Observation method">
+            <div class="workflow-observation-header">
+                <div><span class="card-label">Observation method</span><h3>PostgreSQL behavior and structure observer</h3></div>
+                <p>The observer measures row behavior and final catalog structure inside a rolled-back transaction.</p>
+            </div>
+            <div class="observer-subsection">
+                <div class="observer-subsection-header"><h4>Row behavior</h4><p>The gate establishes rollout policy from database effects, not from SQL text.</p></div>
+                ${behaviorFlow}
+            </div>
+            <div class="observer-subsection observer-structure">
+                <div class="observer-subsection-header"><h4>Final database structure</h4><p>Choose an operation to inspect the normalized catalog effect and reusable rule.</p></div>
+                ${databaseStructureExample()}
+                ${observerSummary("Three rules cover multiple structural operations.", "Structural effects are evidence. They don't create additional product decisions in this scenario.")}
+            </div>
+        </section>
+    `;
+}
+
+function vocabularyCard(title, values, detail, gap = false) {
+    const valueList = values.map((value) => `<code>${value}</code>`).join("");
+    return `
+        <article class="observer-vocabulary-card ${gap ? "observer-vocabulary-gap" : ""}">
+            <h4>${title}</h4>
+            <div>${valueList}</div>
+            <p>${detail}</p>
+        </article>
+    `;
+}
+
+function outcomeBoundaryDetails() {
+    const cards = state.scenario === "api"
+        ? [
+            vocabularyCard("Required baseline effects", ["owner: 202 / +1", "member: 403 / +0"], "Both baseline calls must match before either product outcome is covered."),
+            vocabularyCard("Administrator access", ["OWNER_ONLY", "OWNER_AND_ADMIN"], "The administrator call must match one supported status and job-count combination."),
+            vocabularyCard("Repeated owner request", ["REUSE_ACTIVE_EXPORT", "CREATE_ANOTHER_EXPORT"], "The second owner call must return 202 and create zero or one additional job."),
+            vocabularyCard("Outside the boundary", ["UNMODELED"], "Any other measured status or job-count combination stops the product workflow.", true),
+        ]
+        : [
+            vocabularyCard("Existing-link rollout", ["PRESERVE_EXISTING", "EXPIRE_EXISTING"], "The seeded row must remain NULL or receive an expiration approximately 30 days from migration."),
+            vocabularyCard("Required migration effects", ["timestamptz", "nullable", "default present", "new row +30 days"], "Every schema and inserted-row effect must match before a rollout outcome is covered."),
+            vocabularyCard("Outside the boundary", ["UNMODELED"], "An unsupported row effect stops the product workflow before evidence review.", true),
+        ];
+    return `
+        <section class="workflow-observation" aria-label="Supported outcome boundary">
+            <div class="workflow-observation-header">
+                <div><span class="card-label">Coverage boundary</span><h3>Supported outcome vocabulary</h3></div>
+                <p>The gate accepts only declared outcome identifiers produced from measured effects.</p>
+            </div>
+            <div class="observer-vocabulary">${cards.join("")}</div>
+        </section>
+    `;
+}
+
+function coverageGapDetails() {
+    const detail = state.scenario === "api"
+        ? {
+            observed: "Repeated owner: HTTP 200 / +0 jobs",
+            reason: "Neither repeat option permits HTTP 200, so the observer reports UNMODELED.",
+        }
+        : {
+            observed: "New link: expires_at = NULL",
+            reason: "The required 30-day expiration isn't present, so no supported rollout outcome is valid.",
+        };
+    return `
+        <section class="workflow-observation workflow-observation-gap" aria-label="Coverage gap evidence">
+            <div class="workflow-observation-header">
+                <div><span class="card-label">Boundary result</span><h3>Why this observation stops the run</h3></div>
+                <p>A coverage gap is a platform-observation problem, not a product decision for the owner.</p>
+            </div>
+            <div class="observer-gap-grid">
+                <article><h4>Observed effect</h4><code>${detail.observed}</code></article>
+                <article><h4>No supported match</h4><p>${detail.reason}</p></article>
+                <article><h4>Persist for review</h4><p>Record normalized facts, effects, artifact digest, attempt number, and the pinned commit.</p></article>
+            </div>
+        </section>
+    `;
+}
+
+function verificationObservationDetails() {
+    const comparison = state.scenario === "api"
+        ? {
+            input: "Complete administrator + repeat decisions",
+            probe: "Four bounded handler calls",
+            result: "Both typed outcomes must match",
+        }
+        : {
+            input: "Selected existing-link rollout",
+            probe: "Seed, migrate, insert, inspect, roll back",
+            result: "Rollout outcome and new-link expiration must match",
+        };
+    const flow = observerFlow([
+        { title: "Expected decisions", description: "Load the complete owner-approved decision set.", output: comparison.input },
+        { title: "Run the same observer", description: "Measure the fresh artifact with the original bounded probe.", output: comparison.probe },
+        { title: "Exact comparison", description: "Complete only when every fresh outcome equals its expected value.", output: comparison.result, result: true },
+    ]);
+    return `
+        <section class="workflow-observation" aria-label="Verification observation">
+            <div class="workflow-observation-header">
+                <div><span class="card-label">Verification method</span><h3>Reuse the same observer</h3></div>
+                <p>The second attempt is verified through measured effects using the same coverage boundary as attempt one.</p>
+            </div>
+            ${flow}
+            ${observerSummary("Verification requires an exact match.", "A missing, extra, mismatched, or UNMODELED second-attempt outcome ends in FAILED.")}
+        </section>
+    `;
+}
+
+function workflowObservationDetails(nodeId) {
+    const renderers = {
+        observe1: observationMethodDetails,
+        outcomes: outcomeBoundaryDetails,
+        coverage_gap: coverageGapDetails,
+        verify: verificationObservationDetails,
+    };
+    return renderers[nodeId] ? renderers[nodeId]() : "";
 }
 
 function resetWalkthrough() {
@@ -937,6 +1084,13 @@ workflowCanvas.addEventListener("click", (event) => {
     renderWorkflowInspector();
 });
 
+workflowInspector.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-operation]");
+    if (!button || !structureOperations[button.dataset.operation]) return;
+    state.operation = button.dataset.operation;
+    renderWorkflowInspector();
+});
+
 walkthroughScenarioTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-scenario]");
     if (!button) return;
@@ -978,21 +1132,6 @@ gapToggle.addEventListener("click", () => {
     renderStage();
 });
 
-surfaceTabs.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-surface]");
-    if (!button) return;
-    state.surface = button.dataset.surface;
-    renderCoverage();
-});
-
-coverageContent.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-operation]");
-    if (!button) return;
-    state.operation = button.dataset.operation;
-    renderCoverage();
-});
-
 renderView();
 renderWorkflow();
 renderStage();
-renderCoverage();
