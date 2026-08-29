@@ -344,6 +344,7 @@ const structureOperations = {
 };
 
 const appTabs = document.querySelector(".app-tabs");
+const appMain = document.querySelector(".app-main");
 const workflowScenarioTabs = document.querySelector(".workflow-example-switch");
 const workflowScenarioName = document.querySelector("#workflow-scenario-name");
 const workflowScenarioDetail = document.querySelector("#workflow-scenario-detail");
@@ -410,7 +411,6 @@ function renderWorkflowInspector() {
     workflowInspector.innerHTML = `
         <div class="workflow-inspector-header">
             <div>
-                <span class="card-label">Selected workflow node</span>
                 <div class="workflow-inspector-title">
                     ${statusPill(node.state, workflowStatusTone(node.tone))}
                     <h2>${node.title}</h2>
@@ -439,6 +439,12 @@ function renderWorkflowInspector() {
             <div>${routes}</div>
         </div>
     `;
+}
+
+function scrollToWorkflowInspector() {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const block = workflowInspector.offsetHeight < appMain.clientHeight ? "end" : "start";
+    workflowInspector.scrollIntoView({ behavior, block });
 }
 
 function renderWorkflow() {
@@ -524,11 +530,9 @@ function apiBriefStage() {
         ${stageHeading("STARTED", "neutral", "The brief defines required behavior, but leaves two choices open.")}
         <div class="split-grid">
             <article class="content-card brief-card">
-                <span class="card-label">Authoritative brief</span>
                 <blockquote>Add workspace export creation.<br><br>When no export job exists, workspace owners must receive 202 and create one export job. Workspace members must be denied with 403 and create no export job.</blockquote>
             </article>
             <article class="content-card">
-                <span class="card-label">What isn't specified</span>
                 <div class="open-question"><span>?</span><p>Can an administrator create an export?</p></div>
                 <div class="open-question"><span>?</span><p>What happens when an owner requests another export?</p></div>
                 <p class="card-note">The generated handler must still choose both behaviors.</p>
@@ -554,7 +558,7 @@ function apiObserveStage() {
         ${stageHeading("OBSERVED", "blue", "The observer measures effects instead of asking the agent what it intended.")}
         <div class="split-grid split-observe">
             <article class="content-card code-panel">
-                <div class="card-top"><span class="card-label">Generated artifact</span><span>attempt-1.py</span></div>
+                <div class="card-top"><span>attempt-1.py</span></div>
                 <pre><code>def create_export(role, export_jobs):
     if role != "owner":
         return 403
@@ -564,7 +568,6 @@ function apiObserveStage() {
     return 202</code></pre>
             </article>
             <article class="content-card">
-                <span class="card-label">Observed calls</span>
                 <div class="observation-list">${apiObservationRows()}</div>
             </article>
         </div>
@@ -635,13 +638,11 @@ function apiVerifyStage() {
         ${stageHeading("COMPLETED", "green", "The same observer verifies every selected outcome on one fresh result.")}
         <div class="verification-layout">
             <article class="content-card">
-                <span class="card-label">Completed decision set</span>
                 <div class="contract-row"><span>Administrator access</span><strong>${state.administrator}</strong></div>
                 <div class="contract-row"><span>Repeated request</span><strong>${state.repeat}</strong></div>
                 <div class="fresh-attempt"><span>Fresh process</span><span>Clean worktree</span><span>Original brief</span><span>Both answers</span></div>
             </article>
             <article class="content-card verification-card">
-                <span class="card-label">Attempt two observation</span>
                 <div class="verify-row"><span>First owner request</span><code>202 / +1</code>${statusPill("MATCH", "green")}</div>
                 <div class="verify-row"><span>Repeated owner request</span><code>202 / +${repeatCreates ? "1" : "0"}</code>${statusPill("MATCH", "green")}</div>
                 <div class="verify-row"><span>Administrator</span><code>${adminAllowed ? "202 / +1" : "403 / +0"}</code>${statusPill("MATCH", "green")}</div>
@@ -658,11 +659,9 @@ function databaseBriefStage() {
         ${stageHeading("STARTED", "neutral", "The brief defines expiration for new links, but not existing links.")}
         <div class="split-grid">
             <article class="content-card brief-card">
-                <span class="card-label">Authoritative brief</span>
                 <blockquote>Add 30-day expiration to newly created item-sharing links.</blockquote>
             </article>
             <article class="content-card">
-                <span class="card-label">What isn't specified</span>
                 <div class="open-question"><span>?</span><p>Should existing share links remain non-expiring or receive an expiration?</p></div>
                 <p class="card-note">The migration must choose a rollout policy for existing rows.</p>
             </article>
@@ -678,7 +677,7 @@ function databaseObserveStage() {
         ${stageHeading("OBSERVED", "blue", "The database probe measures row effects inside a rolled-back transaction.")}
         <div class="split-grid split-observe">
             <article class="content-card code-panel">
-                <div class="card-top"><span class="card-label">Generated migration</span><span>attempt-1.sql</span></div>
+                <div class="card-top"><span>attempt-1.sql</span></div>
                 <pre><code>ALTER TABLE share_links
     ADD COLUMN expires_at timestamptz;
 
@@ -687,7 +686,6 @@ ${state.coverageGap ? "-- No default was added." : `ALTER TABLE share_links
     SET DEFAULT (now() + interval '30 days');`}</code></pre>
             </article>
             <article class="content-card">
-                <span class="card-label">Observed rows</span>
                 <div class="observation-list">
                     <div class="observation-row"><span class="role-dot existing"></span><strong>Existing link</strong><code>expires_at</code><span>NULL</span></div>
                     <div class="observation-row ${state.coverageGap ? "row-warning" : ""}"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>${newExpiration}</span></div>
@@ -739,12 +737,10 @@ function databaseVerifyStage() {
         ${stageHeading("COMPLETED", "green", "The database probe verifies the selected rollout policy on a fresh migration.")}
         <div class="verification-layout">
             <article class="content-card">
-                <span class="card-label">Completed decision set</span>
                 <div class="contract-row"><span>Existing-link policy</span><strong>${state.expiration}</strong></div>
                 <div class="fresh-attempt"><span>Fresh process</span><span>Clean worktree</span><span>Original brief</span><span>Owner answer</span></div>
             </article>
             <article class="content-card verification-card">
-                <span class="card-label">Attempt two observation</span>
                 <div class="verify-row"><span>Existing link</span><code>${expiresExisting ? "+30 days" : "NULL"}</code>${statusPill("MATCH", "green")}</div>
                 <div class="verify-row"><span>New link</span><code>+30 days</code>${statusPill("MATCH", "green")}</div>
                 <div class="verify-row"><span>Probe cleanup</span><code>rolled back</code>${statusPill("MATCH", "green")}</div>
@@ -778,7 +774,7 @@ function gapStage() {
         ${stageHeading("COVERAGE_GAP", "violet", "An unsupported observation stops the product workflow without becoming a product decision.")}
         <div class="gap-layout">
             <article class="content-card event-card">
-                <div class="card-top"><span class="card-label">Persisted coverage event</span><span>run.json</span></div>
+                <div class="card-top"><span>run.json</span></div>
                 <pre><code>${event}</code></pre>
             </article>
             <div class="gap-route" aria-label="Coverage gap route">
@@ -840,7 +836,6 @@ function databaseStructureExample() {
         <div class="operation-picker" role="group" aria-label="Database operation">${operationButtons}</div>
         <div class="structure-grid">
             <article class="content-card diff-card">
-                <span class="card-label">Observed catalog change</span>
                 <div class="effect-header"><span class="effect-change">${operation.before === "not present" ? "ADDED" : "CHANGED"}</span><strong>${operation.kind}</strong></div>
                 <dl class="effect-details">
                     <div><dt>Identity</dt><dd>${operation.identity}</dd></div>
@@ -850,7 +845,6 @@ function databaseStructureExample() {
                 </dl>
             </article>
             <article class="rule-result">
-                <span class="card-label">Matched reusable rule</span>
                 <strong>${operation.rule}</strong>
                 <p>${operation.summary}</p>
                 <div class="rule-set"><span class="${operation.rule === "schema_shape" ? "rule-active" : ""}">schema_shape</span><span class="${operation.rule === "data_integrity" ? "rule-active" : ""}">data_integrity</span><span class="${operation.rule === "indexing" ? "rule-active" : ""}">indexing</span></div>
@@ -882,7 +876,7 @@ function observationMethodDetails() {
         return `
             <section class="workflow-observation" aria-label="Observation method">
                 <div class="workflow-observation-header">
-                    <div><span class="card-label">Observation method</span><h3>API behavior observer</h3></div>
+                    <h3>API behavior observer</h3>
                     <p>The observer executes the generated handler in a bounded container and records effects instead of trusting the agent's explanation.</p>
                 </div>
                 ${flow}
@@ -912,7 +906,7 @@ function observationMethodDetails() {
     return `
         <section class="workflow-observation" aria-label="Observation method">
             <div class="workflow-observation-header">
-                <div><span class="card-label">Observation method</span><h3>PostgreSQL behavior and structure observer</h3></div>
+                <h3>PostgreSQL behavior and structure observer</h3>
                 <p>The observer measures row behavior and final catalog structure inside a rolled-back transaction.</p>
             </div>
             <div class="observer-subsection">
@@ -955,7 +949,7 @@ function outcomeBoundaryDetails() {
     return `
         <section class="workflow-observation" aria-label="Supported outcome boundary">
             <div class="workflow-observation-header">
-                <div><span class="card-label">Coverage boundary</span><h3>Supported outcome vocabulary</h3></div>
+                <h3>Supported outcome vocabulary</h3>
                 <p>The gate accepts only declared outcome identifiers produced from measured effects.</p>
             </div>
             <div class="observer-vocabulary">${cards.join("")}</div>
@@ -976,7 +970,7 @@ function coverageGapDetails() {
     return `
         <section class="workflow-observation workflow-observation-gap" aria-label="Coverage gap evidence">
             <div class="workflow-observation-header">
-                <div><span class="card-label">Boundary result</span><h3>Why this observation stops the run</h3></div>
+                <h3>Why this observation stops the run</h3>
                 <p>A coverage gap is a platform-observation problem, not a product decision for the owner.</p>
             </div>
             <div class="observer-gap-grid">
@@ -1008,7 +1002,7 @@ function verificationObservationDetails() {
     return `
         <section class="workflow-observation" aria-label="Verification observation">
             <div class="workflow-observation-header">
-                <div><span class="card-label">Verification method</span><h3>Reuse the same observer</h3></div>
+                <h3>Reuse the same observer</h3>
                 <p>The second attempt is verified through measured effects using the same coverage boundary as attempt one.</p>
             </div>
             ${flow}
@@ -1082,6 +1076,7 @@ workflowCanvas.addEventListener("click", (event) => {
         node.setAttribute("aria-pressed", String(selected));
     });
     renderWorkflowInspector();
+    scrollToWorkflowInspector();
 });
 
 workflowInspector.addEventListener("click", (event) => {
