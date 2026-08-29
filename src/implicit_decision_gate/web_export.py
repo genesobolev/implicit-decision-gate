@@ -1,4 +1,4 @@
-"""Stable presentation contract for notebook and web replays."""
+"""Stable presentation contract for exported gate run snapshots."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class DemoRun(BaseModel):
 
 
 class DemoDataset(BaseModel):
-    """Versioned data consumed by the static walkthrough."""
+    """Versioned data for presentation clients."""
 
     schema_version: int = 1
     generated_from: str

@@ -46,7 +46,6 @@ from implicit_decision_gate.scenarios import (
     WORKSPACE_EXPORT_AUTHORIZATION,
     scenario_registry,
 )
-from implicit_decision_gate.web_export import DemoDataset
 
 WORKSPACE_EXPORT_BRIEF_PATH = "examples/workspace-export-authorization/brief.md"
 SHARE_LINK_SCHEMA_PATH = "examples/share-link-expiration/schema.sql"
@@ -529,50 +528,8 @@ def postgres_structure_examples() -> TableRows:
     ]
 
 
-def adversarial_route_examples(repo_root: Path) -> TableRows:
-    """Load the web replay fixture through the shared typed presentation contract."""
-
-    path = repo_root / "web" / "public" / "demo-runs.json"
-    dataset = DemoDataset.model_validate_json(path.read_text(encoding="utf-8"))
-    rows: TableRows = []
-    for run in dataset.runs:
-        if run.id in {"api-owner-decision", "api-supported", "db-owner-decision"}:
-            continue
-        terminal = (
-            run.failure.category
-            if run.failure is not None
-            else run.coverage_gaps[0].category
-            if run.coverage_gaps
-            else run.state
-        )
-        rows.append((run.label, str(terminal), f"`{run.state}`", run.summary))
-    return rows
-
-
 def _format_facts(facts: Mapping[str, Any]) -> str:
     return "<br>".join(f"`{key}={json.dumps(value)}`" for key, value in facts.items())
-
-
-def observation_assessment(observation: ObservationResult) -> TableRows:
-    """Summarize the four gate surfaces from one typed observation."""
-
-    decisions = (
-        ", ".join(f"`{item.decision_id}={item.option_id}`" for item in observation.decisions)
-        or "None"
-    )
-    unknowns = ", ".join(f"`{item.rule_id}`" for item in observation.unknown_effects) or "None"
-    return [
-        (
-            "Authoritative invariants",
-            "<br>".join(f"`{item.invariant_id}`: {item.status}" for item in observation.invariants),
-        ),
-        ("Owner-selectable decisions", decisions),
-        ("Unknown effects", unknowns),
-        (
-            "Coverage attestations",
-            "<br>".join(f"`{item.rule_id}`: {item.status}" for item in observation.coverage),
-        ),
-    ]
 
 
 def _decision_map(observation: ObservationResult) -> dict[str, str]:

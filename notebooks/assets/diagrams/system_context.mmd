@@ -1,19 +1,17 @@
 flowchart LR
     owner[Human job owner]
     git[Git pinned brief and context]
-    policy[Versioned scenario policy]
     orchestrator[Implicit Decision Gate]
     coder[Fresh Codex coding process]
     observer[Disposable typed observer]
     reviewer[Fresh Codex evidence reviewer]
     store[Durable run store]
-    platform[Platform engineering review]
+    platform[Later platform engineering review]
     verified[Return to wider verified loop]
     trust[Verified Loops trust controls]
 
     owner -->|Authoritative brief| git
     git -->|Pinned inputs| orchestrator
-    policy -->|Invariants decisions effects coverage| orchestrator
     orchestrator -->|Coding prompt| coder
     coder -->|Generated artifact| orchestrator
     orchestrator -->|Artifact and context| observer
@@ -22,7 +20,7 @@ flowchart LR
     reviewer -->|Evidence classifications| orchestrator
     orchestrator -->|Missing product decisions| owner
     owner -->|Typed owner decisions| orchestrator
-    orchestrator -->|Persist run evidence and policy digest| store
-    store -.->|Coverage events| platform
+    orchestrator -->|Persist typed run evidence| store
+    store -.->|Coverage events for later review| platform
     orchestrator -->|Verified completion| verified
     trust -.->|Identity tools evidence permissions| orchestrator

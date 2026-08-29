@@ -16,7 +16,7 @@ class EmptyObserver:
         return ObservationResult()
 
 
-def test_static_web_replays_use_the_typed_gate_contract() -> None:
+def test_demo_dataset_uses_the_typed_gate_contract() -> None:
     path = Path("web/public/demo-runs.json")
     dataset = DemoDataset.model_validate_json(path.read_text(encoding="utf-8"))
 

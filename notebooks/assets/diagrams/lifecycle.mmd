@@ -8,29 +8,29 @@ sequenceDiagram
     participant C2 as Codex attempt two
 
     O->>G: Supply authoritative brief
-    G->>S: Pin policy snapshot and digest
     G->>C1: Send first coding prompt
-    C1-->>G: Return generated artifact
-    G->>P: Execute declared observer rules
-    P-->>G: Return invariants decisions effects and coverage
-    G->>S: Persist attempt evidence
-    alt Invariant violated or effect forbidden
-        G->>S: Persist typed failure
-        G-->>O: Return FAILED
-    else Unknown effect or missing coverage
-        G->>S: Persist typed coverage gap
-        G-->>O: Stop for platform review
-    else Policy evaluation passes
+    C1-->>G: Return generated handler
+    G->>P: Execute declared checks
+    P-->>G: Return typed attempt evidence
+    G->>S: Persist attempt and policy snapshot
+    alt Evidence passes policy checks
         loop Each owner decision
-            G->>R: Send brief and observed option
+            G->>R: Send brief and observed behavior
             R-->>G: Return evidence classification
         end
         G-->>O: Pause with decision requests
         O->>G: Record typed owner answers
         G->>C2: Send fresh prompt with completed intent
-        C2-->>G: Return regenerated artifact
-        G->>P: Execute every observer rule again
-        P-->>G: Return full attempt two evidence
-        G->>G: Evaluate all policy surfaces and exact decisions
+        C2-->>G: Return regenerated handler
+        G->>P: Execute every declared check again
+        P-->>G: Return full retry evidence
+        G->>G: Evaluate policy and selected decisions
         G-->>O: Return COMPLETED FAILED or COVERAGE_GAP
+    else Decision unknown or coverage missing
+        G->>S: Mark run as COVERAGE_GAP
+        Note over S: Available for later platform engineering review
+        G-->>O: Stop without product decision or retry
+    else Invariant violated or effect forbidden
+        G->>S: Persist typed failure
+        G-->>O: Return FAILED
     end

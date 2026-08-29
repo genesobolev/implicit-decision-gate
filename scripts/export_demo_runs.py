@@ -1,4 +1,4 @@
-"""Export persisted gate runs for the static web replay."""
+"""Export persisted gate runs for presentation clients."""
 
 from __future__ import annotations
 

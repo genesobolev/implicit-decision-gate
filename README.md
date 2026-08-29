@@ -30,7 +30,8 @@ a pass, or a generic exception.
 - A durable run pins the policy snapshot and digest used to interpret its evidence.
 - Attempt two repeats the full invariant, effect, and coverage pipeline before exact
     decision verification.
-- The notebook and web replay consume the same typed contract as persisted runs.
+- The notebook helpers and exported demo snapshots use the same typed contract as
+    persisted runs. The web replay presents those semantics as a guided product story.
 
 ## Primary example
 
@@ -58,7 +59,7 @@ The workspace-export and share-link scenarios are fictional. They make no claim 
 
 ## How the gate works
 
-![Lifecycle showing typed policy evaluation, one durable pause, a clean retry, and full verification.](notebooks/assets/diagrams/lifecycle.svg)
+![Lifecycle showing typed policy evaluation, one durable pause, a clean retry, and full verification.](notebooks/assets/diagrams/lifecycle.png)
 
 [Review the Mermaid source.](notebooks/assets/diagrams/lifecycle.mmd)
 
@@ -115,19 +116,20 @@ the completed decision set.
 
 ## Run the web interface
 
-The static site loads a checked-in `DemoDataset` validated by the same Python models used
-to project real `RunRecord` snapshots. It includes owner pauses, invariant failures,
-forbidden and unclassified effects, missing observer results, retry mismatches, and an
-attempt-two side effect.
+The static site is a guided, narrative replay of the gate. Its default path demonstrates
+the core owner-decision loop. The original workflow graph, node inspector, API and
+database examples, and five-stage walkthrough remain the primary experience. Optional
+robustness cases show invariant failures, forbidden effects, missing observer coverage,
+retry mismatches, and an attempt-two side effect.
 
 ```bash
 uv run python -m http.server 8000 --directory web/public
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Deep links preserve the selected
-view, scenario, replay case, and attempt in the URL fragment.
+Open [http://localhost:8000](http://localhost:8000).
 
-To export real run snapshots through the same presentation contract:
+The checked-in `DemoDataset` is validated by the same Python models used to project real
+`RunRecord` snapshots. To export real run snapshots through that presentation contract:
 
 ```bash
 uv run python scripts/export_demo_runs.py \
@@ -203,7 +205,7 @@ terminal semantics demonstrated here.
 
 ## Trust boundary
 
-![System context showing the human owner, versioned policy, typed observer, durable gate, and platform review.](notebooks/assets/diagrams/system_context.svg)
+![System context showing the human owner, versioned policy, typed observer, durable gate, and platform review.](notebooks/assets/diagrams/system_context.png)
 
 [Review the Mermaid source.](notebooks/assets/diagrams/system_context.mmd)
 
