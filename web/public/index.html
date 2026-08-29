@@ -25,7 +25,6 @@
             <nav class="app-tabs" role="tablist" aria-label="Application views">
                 <button id="workflow-tab" type="button" role="tab" data-view="workflow" aria-selected="true" aria-controls="workflow-view">Workflow</button>
                 <button id="walkthrough-tab" type="button" role="tab" data-view="walkthrough" aria-selected="false" aria-controls="walkthrough-view">Guided replay</button>
-                <button id="coverage-tab" type="button" role="tab" data-view="coverage" aria-selected="false" aria-controls="coverage-view">Observer coverage</button>
             </nav>
         </header>
 
@@ -34,7 +33,7 @@
                 <div class="view-header">
                     <div>
                         <h1>Inspect every route through the gate</h1>
-                        <p>Select any node to inspect its trigger, persisted evidence, scenario facts, and possible next states.</p>
+                        <p>Select any node to inspect its trigger, persisted evidence, scenario facts, observation details, and possible next states.</p>
                     </div>
                 </div>
 
@@ -102,23 +101,6 @@
                 </div>
             </section>
 
-            <section class="app-view" id="coverage-view" role="tabpanel" aria-labelledby="coverage-tab" data-view-panel="coverage" hidden>
-                <div class="view-header">
-                    <div>
-                        <h1>Compare bounded system surfaces</h1>
-                        <p>See how different observers normalize system effects for the same gate lifecycle.</p>
-                    </div>
-                </div>
-
-                <div class="coverage-shell">
-                    <div class="surface-tabs" id="surface-tabs" role="tablist" aria-label="Observer surfaces">
-                        <button type="button" role="tab" data-surface="api" aria-selected="true">API behavior</button>
-                        <button type="button" role="tab" data-surface="database" aria-selected="false">Database behavior</button>
-                        <button type="button" role="tab" data-surface="structure" aria-selected="false">Database structure</button>
-                    </div>
-                    <div class="coverage-content" id="coverage-content"></div>
-                </div>
-            </section>
         </main>
     </div>
 
