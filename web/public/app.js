@@ -36,13 +36,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Pinned API inputs", database: "Pinned database inputs" },
         summary: "The gate creates a durable run before any model or observer executes.",
-        trigger: "A caller starts one configured scenario from an authoritative brief.",
         persists: ["Original brief", "Pinned Git commit", "Scenario identifier", "STARTED state"],
         facts: {
             api: ["Workspace export authorization scenario", "Two declared behavior decisions"],
             database: ["Share-link expiration scenario", "One declared rollout decision"],
         },
-        routes: [{ label: "Create attempt one", target: "Attempt one", tone: "normal" }],
     },
     {
         id: "attempt1",
@@ -53,16 +51,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Fresh Python artifact", database: "Fresh SQL migration" },
         summary: "A fresh coding process receives the original brief and technical context.",
-        trigger: "The persisted run is in STARTED and has no earlier coding attempt.",
         persists: ["Clean worktree record", "Coding prompt", "Model provenance", "Artifact digest"],
         facts: {
             api: ["Creates a Python handler", "Receives no owner decisions"],
             database: ["Creates a PostgreSQL migration", "Receives no owner decisions"],
         },
-        routes: [
-            { label: "Artifact executes", target: "Observe attempt one", tone: "normal" },
-            { label: "Any execution error", target: "FAILED", tone: "failed" },
-        ],
     },
     {
         id: "observe1",
@@ -73,13 +66,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Four bounded calls", database: "Transactional row probe" },
         summary: "A bounded observer records system effects without relying on the coding model's explanation.",
-        trigger: "Attempt one produced a non-empty artifact that can be executed by the scenario observer.",
         persists: ["Normalized facts", "Observed effects", "Typed outcomes", "Attempt completion time"],
         facts: {
             api: ["Owner called twice with shared state", "Administrator and member called once"],
             database: ["Existing row seeded before migration", "New row inserted and probe rolled back"],
         },
-        routes: [{ label: "Observation recorded", target: "Validate outcomes", tone: "normal" }],
     },
     {
         id: "outcomes",
@@ -90,17 +81,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Two outcome identifiers", database: "One outcome identifier" },
         summary: "The gate checks that every declared decision has exactly one covered or unmodeled outcome.",
-        trigger: "Attempt one has a completed observation with normalized outcomes.",
         persists: ["Outcome identifiers", "Coverage-gap facts when present", "Validation error when invalid"],
         facts: {
             api: ["Administrator access outcome", "Repeated owner request outcome"],
             database: ["Existing-link expiration outcome", "New-link expiration remains required"],
         },
-        routes: [
-            { label: "All outcomes modeled", target: "Evidence review", tone: "normal" },
-            { label: "Any UNMODELED outcome", target: "COVERAGE_GAP", tone: "gap" },
-            { label: "Missing, extra, or undeclared outcome", target: "FAILED", tone: "failed" },
-        ],
     },
     {
         id: "coverage_gap",
@@ -111,13 +96,11 @@ const workflowNodes = [
         tone: "gap",
         context: { api: "Unsupported API effect", database: "Unsupported row effect" },
         summary: "An unmodeled first-attempt effect ends the product workflow without becoming a human product decision.",
-        trigger: "At least one first-attempt outcome is explicitly reported as UNMODELED.",
         persists: ["Coverage-gap record", "Normalized facts and effects", "Artifact digest", "Attempt number"],
         facts: {
             api: ["Example: repeated owner request returns an unsupported result", "No evidence review or owner request runs"],
             database: ["Example: a new link doesn't receive required expiration", "No evidence review or owner request runs"],
         },
-        routes: [{ label: "Separate platform review", target: "Outside the product run", tone: "gap" }],
     },
     {
         id: "review",
@@ -128,17 +111,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Two independent reviews", database: "One independent review" },
         summary: "Each modeled choice is reviewed independently against the original brief.",
-        trigger: "Every first-attempt outcome matches a declared option and no coverage gap exists.",
         persists: ["Reviewer prompt per decision", "Evidence classification", "Evidence quote", "Reviewer provenance"],
         facts: {
             api: ["Administrator and repeat behavior reviewed separately", "One contradiction fails the complete run"],
             database: ["Existing-link rollout policy reviewed", "New-link expiration is already specified"],
         },
-        routes: [
-            { label: "All decisions SUPPORTED", target: "COMPLETED", tone: "complete" },
-            { label: "Any NOT_EVIDENCED or UNCERTAIN", target: "AWAITING_OWNER", tone: "owner" },
-            { label: "Any CONTRADICTED", target: "FAILED", tone: "failed" },
-        ],
     },
     {
         id: "completed_first",
@@ -149,13 +126,11 @@ const workflowNodes = [
         tone: "complete",
         context: { api: "Both choices supported", database: "Rollout choice supported" },
         summary: "The first artifact completes the run when the brief supports every observed choice.",
-        trigger: "Every evidence review returns SUPPORTED.",
         persists: ["Completed decision records", "Attempt-one artifact digest", "COMPLETED state"],
         facts: {
             api: ["No owner answers are needed", "No second coding attempt runs"],
             database: ["No owner answer is needed", "No second migration attempt runs"],
         },
-        routes: [{ label: "Terminal state", target: "No further product transition", tone: "complete" }],
     },
     {
         id: "awaiting_owner",
@@ -166,16 +141,11 @@ const workflowNodes = [
         tone: "owner",
         context: { api: "Up to two owner answers", database: "One owner answer" },
         summary: "The gate presents every unsupported or uncertain product choice in one durable pause.",
-        trigger: "At least one review is NOT_EVIDENCED or UNCERTAIN and none is CONTRADICTED.",
         persists: ["Typed decision requests", "Available options", "Each submitted answer", "Answer timestamps"],
         facts: {
             api: ["Administrator access decision", "Repeated owner request decision"],
             database: ["Preserve or expire existing links", "Only one answer is required"],
         },
-        routes: [
-            { label: "Required answers remain", target: "AWAITING_OWNER", tone: "owner" },
-            { label: "All required answers recorded", target: "READY_TO_RESUME", tone: "normal" },
-        ],
     },
     {
         id: "ready",
@@ -186,13 +156,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Complete two-decision set", database: "Complete one-decision set" },
         summary: "Recording the final required answer completes the decision set without invoking a model.",
-        trigger: "Every decision that requires an owner has one selected option.",
         persists: ["Complete selected decision set", "READY_TO_RESUME state"],
         facts: {
             api: ["Both API behavior choices are fixed", "One resume operation covers both choices"],
             database: ["Existing-link rollout policy is fixed", "The required new-link behavior remains unchanged"],
         },
-        routes: [{ label: "Resume run", target: "Attempt two", tone: "normal" }],
     },
     {
         id: "attempt2",
@@ -203,16 +171,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Fresh Python artifact", database: "Fresh SQL migration" },
         summary: "A clean coding process receives the original inputs and completed decision set.",
-        trigger: "The run is READY_TO_RESUME and contains exactly one completed first attempt.",
         persists: ["Second clean worktree", "Prompt with owner decisions", "Second artifact digest", "Model provenance"],
         facts: {
             api: ["Receives both selected API outcomes", "Doesn't receive attempt one's artifact"],
             database: ["Receives the selected rollout policy", "Doesn't receive attempt one's migration"],
         },
-        routes: [
-            { label: "Artifact executes", target: "Verify outcomes", tone: "normal" },
-            { label: "Any execution error", target: "FAILED", tone: "failed" },
-        ],
     },
     {
         id: "verify",
@@ -223,16 +186,11 @@ const workflowNodes = [
         tone: "normal",
         context: { api: "Compare two outcomes", database: "Compare one outcome" },
         summary: "The same observer compares every fresh outcome with the complete expected decision set.",
-        trigger: "Attempt two produced a completed observation.",
         persists: ["Second observation", "Expected and observed outcomes", "Coverage event for second-attempt UNMODELED"],
         facts: {
             api: ["Selected answers override unsupported attempt-one choices", "Supported choices retain their observed value"],
             database: ["Existing-link policy must match the answer", "New links must still expire after 30 days"],
         },
-        routes: [
-            { label: "Every expected outcome matches", target: "COMPLETED", tone: "complete" },
-            { label: "Missing, extra, mismatched, or UNMODELED", target: "FAILED", tone: "failed" },
-        ],
     },
     {
         id: "completed_verified",
@@ -243,13 +201,11 @@ const workflowNodes = [
         tone: "complete",
         context: { api: "Both outcomes match", database: "Rollout outcome matches" },
         summary: "The run completes only when the fresh artifact matches every expected outcome.",
-        trigger: "Attempt two returns exactly the expected outcome for every declared decision.",
         persists: ["Both attempt records", "Verified decision set", "COMPLETED state"],
         facts: {
             api: ["Administrator behavior matches", "Repeated owner behavior matches"],
             database: ["Existing-link policy matches", "New-link expiration remains correct"],
         },
-        routes: [{ label: "Terminal state", target: "No further product transition", tone: "complete" }],
     },
     {
         id: "failed",
@@ -260,34 +216,32 @@ const workflowNodes = [
         tone: "failed",
         context: { api: "Execution or behavior failure", database: "Execution or migration failure" },
         summary: "The gate records a terminal failure when execution, evidence, or verification violates the workflow contract.",
-        trigger: "An attempt errors, outcomes are invalid, evidence is contradicted, or attempt two doesn't match.",
         persists: ["Failure message", "Available attempt evidence", "Artifact digest when available", "FAILED state"],
         facts: {
             api: ["Examples: container error or mismatched API outcome", "A second-attempt UNMODELED result is a mismatch"],
             database: ["Examples: invalid migration or mismatched row effect", "A second-attempt UNMODELED result is a mismatch"],
         },
-        routes: [{ label: "Terminal state", target: "No automatic retry", tone: "failed" }],
     },
 ];
 
-const workflowEdges = [
-    { path: "M185 281 L205 281", label: "", x: 195, y: 265, tone: "normal" },
-    { path: "M365 281 L385 281", label: "", x: 375, y: 265, tone: "normal" },
-    { path: "M545 281 L565 281", label: "", x: 555, y: 265, tone: "normal" },
-    { path: "M725 281 L745 281", label: "", x: 735, y: 265, tone: "normal" },
-    { path: "M645 245 L645 102", label: "UNMODELED", x: 645, y: 174, tone: "gap" },
-    { path: "M645 317 L645 625", label: "Invalid outcome set", x: 645, y: 472, tone: "failed" },
-    { path: "M285 317 L285 590 L605 590 L605 625", label: "Execution error", x: 400, y: 574, tone: "failed" },
-    { path: "M825 245 L825 102", label: "All supported", x: 825, y: 174, tone: "complete" },
-    { path: "M905 281 L925 281", label: "Needs owner", x: 915, y: 225, tone: "owner" },
-    { path: "M825 317 L825 570 L685 570 L685 625", label: "Contradicted", x: 790, y: 554, tone: "failed" },
-    { path: "M965 245 C965 180 1045 180 1045 245", label: "Partial answers", x: 1005, y: 181, tone: "owner" },
-    { path: "M1085 281 L1105 281", label: "All answered", x: 1095, y: 225, tone: "normal" },
-    { path: "M1185 317 L1185 455", label: "Resume", x: 1185, y: 386, tone: "normal" },
-    { path: "M1105 491 L1085 491", label: "Fresh result", x: 1095, y: 435, tone: "normal" },
-    { path: "M925 491 L905 491", label: "Exact match", x: 915, y: 435, tone: "complete" },
-    { path: "M1185 527 L1185 606 L725 606 L725 661", label: "Execution error", x: 1090, y: 590, tone: "failed" },
-    { path: "M1005 527 L1005 582 L705 582 L705 625", label: "Mismatch", x: 900, y: 566, tone: "failed" },
+const workflowRoutes = [
+    { from: "started", to: "attempt1", path: "M185 281 L205 281", label: "", x: 195, y: 265, tone: "normal" },
+    { from: "attempt1", to: "observe1", path: "M365 281 L385 281", label: "", x: 375, y: 265, tone: "normal" },
+    { from: "observe1", to: "outcomes", path: "M545 281 L565 281", label: "", x: 555, y: 265, tone: "normal" },
+    { from: "outcomes", to: "review", path: "M725 281 L745 281", label: "", x: 735, y: 265, tone: "normal" },
+    { from: "outcomes", to: "coverage_gap", path: "M645 245 L645 102", label: "UNMODELED", x: 645, y: 174, tone: "gap" },
+    { from: "outcomes", to: "failed", path: "M645 317 L645 625", label: "Invalid outcome set", x: 645, y: 472, tone: "failed" },
+    { from: "attempt1", to: "failed", path: "M285 317 L285 590 L605 590 L605 625", label: "Execution error", x: 400, y: 574, tone: "failed" },
+    { from: "review", to: "completed_first", path: "M825 245 L825 102", label: "All supported", x: 825, y: 174, tone: "complete" },
+    { from: "review", to: "awaiting_owner", path: "M905 281 L925 281", label: "Needs owner", x: 915, y: 225, tone: "owner" },
+    { from: "review", to: "failed", path: "M825 317 L825 570 L685 570 L685 625", label: "Contradicted", x: 790, y: 554, tone: "failed" },
+    { from: "awaiting_owner", to: "awaiting_owner", path: "M965 245 C965 180 1045 180 1045 245", label: "Partial answers", x: 1005, y: 181, tone: "owner" },
+    { from: "awaiting_owner", to: "ready", path: "M1085 281 L1105 281", label: "All answered", x: 1095, y: 225, tone: "normal" },
+    { from: "ready", to: "attempt2", path: "M1185 317 L1185 455", label: "Resume", x: 1185, y: 386, tone: "normal" },
+    { from: "attempt2", to: "verify", path: "M1105 491 L1085 491", label: "Fresh result", x: 1095, y: 435, tone: "normal" },
+    { from: "verify", to: "completed_verified", path: "M925 491 L905 491", label: "Exact match", x: 915, y: 435, tone: "complete" },
+    { from: "attempt2", to: "failed", path: "M1185 527 L1185 606 L725 606 L725 661", label: "Execution error", x: 1090, y: 590, tone: "failed" },
+    { from: "verify", to: "failed", path: "M1005 527 L1005 582 L705 582 L705 625", label: "Mismatch", x: 900, y: 566, tone: "failed" },
 ];
 
 const structureOperations = {
@@ -364,16 +318,22 @@ function workflowStatusTone(tone) {
     return { normal: "blue", owner: "amber", complete: "green", gap: "violet", failed: "red" }[tone];
 }
 
-function workflowEdgeMarkup(edge) {
-    const labelWidth = Math.max(58, edge.label.length * 6.2 + 18);
-    const label = edge.label ? `
-        <g class="workflow-edge-label workflow-edge-label-${edge.tone}" transform="translate(${edge.x} ${edge.y})">
+function workflowNodeById(nodeId) {
+    return workflowNodes.find((node) => node.id === nodeId);
+}
+
+function workflowEdgeMarkup(route) {
+    const connected = route.from === state.workflowNode || route.to === state.workflowNode;
+    const connectedClass = connected ? "workflow-edge-connected" : "";
+    const labelWidth = Math.max(58, route.label.length * 6.2 + 18);
+    const label = route.label ? `
+        <g class="workflow-edge-label workflow-edge-label-${route.tone} ${connectedClass}" transform="translate(${route.x} ${route.y})">
             <rect x="${-labelWidth / 2}" y="-10" width="${labelWidth}" height="20" rx="6"></rect>
-            <text text-anchor="middle" dominant-baseline="central">${edge.label}</text>
+            <text text-anchor="middle" dominant-baseline="central">${route.label}</text>
         </g>
     ` : "";
     return `
-        <path class="workflow-edge-line workflow-edge-${edge.tone}" d="${edge.path}" marker-end="url(#workflow-arrow-${edge.tone})"></path>
+        <path class="workflow-edge-line workflow-edge-${route.tone} ${connectedClass}" d="${route.path}" marker-end="url(#workflow-arrow-${route.tone})"></path>
         ${label}
     `;
 }
@@ -396,17 +356,41 @@ function workflowNodeMarkup(node) {
     `;
 }
 
+function workflowRouteInspectorMarkup(route) {
+    const fromNode = workflowNodeById(route.from);
+    const toNode = workflowNodeById(route.to);
+    const condition = route.label ? `
+        <span class="workflow-route-condition workflow-route-condition-${route.tone}">${route.label}</span>
+        <span class="workflow-route-arrow" aria-hidden="true">→</span>
+    ` : "";
+    return `
+        <li class="workflow-route-path workflow-route-path-${route.tone}">
+            <span class="workflow-route-node ${route.from === state.workflowNode ? "workflow-route-node-selected" : ""}">${fromNode.title}</span>
+            <span class="workflow-route-arrow" aria-hidden="true">→</span>
+            ${condition}
+            <span class="workflow-route-node ${route.to === state.workflowNode ? "workflow-route-node-selected" : ""}">${toNode.title}</span>
+        </li>
+    `;
+}
+
+function workflowRouteListMarkup(routes, emptyMessage) {
+    if (!routes.length) return `<p class="workflow-route-empty">${emptyMessage}</p>`;
+    return `<ul class="workflow-route-list">${routes.map(workflowRouteInspectorMarkup).join("")}</ul>`;
+}
+
+function workflowTerminalMessage(node) {
+    if (node.id === "coverage_gap") return "End of the product run. Coverage review happens outside this workflow.";
+    if (node.state === "COMPLETED") return "Run completed. There are no further routes.";
+    return "Run ended in failure. There is no automatic retry route.";
+}
+
 function renderWorkflowInspector() {
-    const node = workflowNodes.find((item) => item.id === state.workflowNode) || workflowNodes[0];
+    const node = workflowNodeById(state.workflowNode) || workflowNodes[0];
     const exampleLabel = state.scenario === "api" ? "API example" : "Database example";
     const persisted = node.persists.map((item) => `<li>${item}</li>`).join("");
     const facts = node.facts[state.scenario].map((item) => `<li>${item}</li>`).join("");
-    const routes = node.routes.map((route) => `
-        <div class="workflow-route workflow-route-${route.tone}">
-            <span>${route.label}</span>
-            <strong>${route.target}</strong>
-        </div>
-    `).join("");
+    const incomingRoutes = workflowRoutes.filter((route) => route.to === node.id);
+    const outgoingRoutes = workflowRoutes.filter((route) => route.from === node.id);
 
     workflowInspector.innerHTML = `
         <div class="workflow-inspector-header">
@@ -415,29 +399,33 @@ function renderWorkflowInspector() {
                     ${statusPill(node.state, workflowStatusTone(node.tone))}
                     <h2>${node.title}</h2>
                 </div>
+                <strong class="workflow-inspector-context">${node.context[state.scenario]}</strong>
                 <p>${node.summary}</p>
             </div>
             <span class="workflow-example-label">${exampleLabel}</span>
         </div>
-        <div class="workflow-inspector-grid">
-            <article>
-                <h3>Entry condition</h3>
-                <p>${node.trigger}</p>
-            </article>
-            <article>
+        <div class="workflow-route-overview">
+            <section class="workflow-route-section" aria-labelledby="workflow-arrival-heading">
+                <h3 id="workflow-arrival-heading">How the run arrived here</h3>
+                ${workflowRouteListMarkup(incomingRoutes, "This is the graph entry point.")}
+            </section>
+            <section class="workflow-route-section" aria-labelledby="workflow-next-heading">
+                <h3 id="workflow-next-heading">Possible next routes</h3>
+                ${workflowRouteListMarkup(outgoingRoutes, workflowTerminalMessage(node))}
+            </section>
+        </div>
+        <section class="workflow-example-section" aria-labelledby="workflow-example-heading">
+            <h3 id="workflow-example-heading">What happens in this example</h3>
+            <ul>${facts}</ul>
+        </section>
+        ${workflowObservationDetails(node.id)}
+        <details class="workflow-run-record">
+            <summary>Run record details</summary>
+            <div>
                 <h3>Persisted evidence</h3>
                 <ul>${persisted}</ul>
-            </article>
-            <article>
-                <h3>${exampleLabel} facts</h3>
-                <ul>${facts}</ul>
-            </article>
-        </div>
-        ${workflowObservationDetails(node.id)}
-        <div class="workflow-routes">
-            <h3>Possible next routes</h3>
-            <div>${routes}</div>
-        </div>
+            </div>
+        </details>
     `;
 }
 
@@ -454,7 +442,7 @@ function renderWorkflow() {
             <path class="workflow-arrow-head workflow-arrow-head-${tone}" d="M0 0 L8 4 L0 8 Z"></path>
         </marker>
     `).join("");
-    const edges = workflowEdges.map(workflowEdgeMarkup).join("");
+    const edges = workflowRoutes.map(workflowEdgeMarkup).join("");
     const nodes = workflowNodes.map(workflowNodeMarkup).join("");
 
     workflowCanvas.innerHTML = `
@@ -1070,12 +1058,7 @@ workflowCanvas.addEventListener("click", (event) => {
     const button = event.target.closest("[data-workflow-node]");
     if (!button) return;
     state.workflowNode = button.dataset.workflowNode;
-    workflowCanvas.querySelectorAll("[data-workflow-node]").forEach((node) => {
-        const selected = node.dataset.workflowNode === state.workflowNode;
-        node.classList.toggle("workflow-node-selected", selected);
-        node.setAttribute("aria-pressed", String(selected));
-    });
-    renderWorkflowInspector();
+    renderWorkflow();
     scrollToWorkflowInspector();
 });
 

@@ -390,6 +390,13 @@ label:has(input:focus-visible) {
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-width: 1.8;
+    opacity: 0.68;
+    transition: opacity 140ms ease, stroke-width 140ms ease;
+}
+
+.workflow-edge-line.workflow-edge-connected {
+    stroke-width: 3;
+    opacity: 1;
 }
 
 .workflow-edge-normal {
@@ -436,6 +443,11 @@ label:has(input:focus-visible) {
     fill: rgba(255, 255, 255, 0.95);
     stroke: #d9dee7;
     stroke-width: 1;
+}
+
+.workflow-edge-label.workflow-edge-connected rect {
+    stroke: var(--brand-blue);
+    stroke-width: 1.5;
 }
 
 .workflow-edge-label text {
@@ -592,6 +604,13 @@ label:has(input:focus-visible) {
     color: var(--text-soft);
 }
 
+.workflow-inspector-context {
+    display: block;
+    margin-top: 9px;
+    color: var(--brand-blue-deep);
+    font-size: 12px;
+}
+
 .workflow-example-label {
     flex: 0 0 auto;
     padding: 6px 10px;
@@ -603,103 +622,166 @@ label:has(input:focus-visible) {
     font-weight: 700;
 }
 
-.workflow-inspector-grid {
+.workflow-route-overview {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
-    margin-top: 20px;
+    margin-top: 22px;
 }
 
-.workflow-inspector-grid article {
+.workflow-route-section {
     min-width: 0;
-    padding: 15px;
+    padding: 17px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-subtle);
+}
+
+.workflow-route-section h3,
+.workflow-example-section h3,
+.workflow-run-record h3 {
+    margin: 0;
+    color: var(--intrepid-blue);
+    font-size: 12px;
+}
+
+.workflow-route-list {
+    display: grid;
+    gap: 9px;
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.workflow-route-path {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 10px;
+    border: 1px solid #cbd9ef;
+    border-left-width: 3px;
+    border-radius: 9px;
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 10px;
+}
+
+.workflow-route-path-owner {
+    border-color: #e4cb9e;
+}
+
+.workflow-route-path-complete {
+    border-color: #addbc9;
+}
+
+.workflow-route-path-gap {
+    border-color: #cbbdea;
+}
+
+.workflow-route-path-failed {
+    border-color: #e4b8b2;
+}
+
+.workflow-route-node {
+    min-width: 0;
+    color: var(--intrepid-blue);
+    font-weight: 680;
+}
+
+.workflow-route-node-selected {
+    color: var(--brand-blue-deep);
+    text-decoration: underline;
+    text-decoration-color: rgba(20, 95, 228, 0.35);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+
+.workflow-route-arrow {
+    flex: 0 0 auto;
+    color: var(--text-faint);
+}
+
+.workflow-route-condition {
+    min-width: 0;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: var(--brand-blue-soft);
+    color: var(--brand-blue-deep);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: center;
+}
+
+.workflow-route-condition-owner {
+    background: var(--amber-soft);
+    color: var(--amber);
+}
+
+.workflow-route-condition-complete {
+    background: var(--green-soft);
+    color: var(--green);
+}
+
+.workflow-route-condition-gap {
+    background: var(--violet-soft);
+    color: var(--violet);
+}
+
+.workflow-route-condition-failed {
+    background: var(--red-soft);
+    color: var(--red);
+}
+
+.workflow-route-empty {
+    margin: 12px 0 0;
+    color: var(--text-soft);
+    font-size: 11px;
+}
+
+.workflow-example-section {
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+
+.workflow-example-section ul,
+.workflow-run-record ul {
+    display: grid;
+    gap: 6px;
+    margin: 10px 0 0;
+    padding-left: 19px;
+    color: var(--text-soft);
+    font-size: 11px;
+}
+
+.workflow-run-record {
+    margin-top: 20px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--surface-subtle);
 }
 
-.workflow-inspector-grid h3,
-.workflow-routes h3 {
-    margin: 0 0 8px;
+.workflow-run-record summary {
+    padding: 12px 15px;
     color: var(--intrepid-blue);
-    font-size: 12px;
-}
-
-.workflow-inspector-grid p,
-.workflow-inspector-grid ul {
-    margin: 0;
-    color: var(--text-soft);
+    cursor: pointer;
     font-size: 11px;
+    font-weight: 700;
 }
 
-.workflow-inspector-grid ul {
-    display: grid;
-    gap: 5px;
-    padding-left: 17px;
-}
-
-.workflow-routes {
-    margin-top: 17px;
-}
-
-.workflow-routes > div {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.workflow-route {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border: 1px solid #cbd9ef;
-    border-radius: 8px;
-    background: var(--brand-blue-soft);
-    color: var(--text-soft);
-    font-size: 10px;
-}
-
-.workflow-route strong {
+.workflow-run-record summary:hover {
     color: var(--brand-blue-deep);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 9px;
 }
 
-.workflow-route-owner {
-    border-color: #e4cb9e;
-    background: var(--amber-soft);
+.workflow-run-record summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
 }
 
-.workflow-route-owner strong {
-    color: var(--amber);
-}
-
-.workflow-route-complete {
-    border-color: #addbc9;
-    background: var(--green-soft);
-}
-
-.workflow-route-complete strong {
-    color: var(--green);
-}
-
-.workflow-route-gap {
-    border-color: #cbbdea;
-    background: var(--violet-soft);
-}
-
-.workflow-route-gap strong {
-    color: var(--violet);
-}
-
-.workflow-route-failed {
-    border-color: #e4b8b2;
-    background: var(--red-soft);
-}
-
-.workflow-route-failed strong {
-    color: var(--red);
+.workflow-run-record > div {
+    padding: 0 15px 15px 34px;
 }
 
 .status-red {
@@ -1927,7 +2009,7 @@ noscript {
         width: min(430px, 52vw);
     }
 
-    .workflow-inspector-grid {
+    .workflow-route-overview {
         grid-template-columns: 1fr;
     }
 }
@@ -2024,8 +2106,13 @@ noscript {
         flex-direction: column;
     }
 
-    .workflow-routes > div {
-        display: grid;
+    .workflow-route-path {
+        flex-wrap: wrap;
+    }
+
+    .workflow-route-node,
+    .workflow-route-condition {
+        overflow-wrap: anywhere;
     }
 
     .demo-toolbar {
