@@ -390,33 +390,6 @@ label:has(input:focus-visible) {
     overflow: visible;
 }
 
-.workflow-canvas-note {
-    position: absolute;
-    top: 34px;
-    left: 25px;
-    z-index: 2;
-    width: 330px;
-    padding: 13px 15px;
-    border: 1px solid #d6e1f5;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 3px 10px rgba(40, 59, 91, 0.06);
-}
-
-.workflow-canvas-note span {
-    color: var(--brand-blue-deep);
-    font-size: 10px;
-    font-weight: 750;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.workflow-canvas-note p {
-    margin: 3px 0 0;
-    color: var(--text-soft);
-    font-size: 11px;
-}
-
 .workflow-nodes {
     z-index: 2;
     pointer-events: none;
