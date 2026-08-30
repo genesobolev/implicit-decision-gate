@@ -15,9 +15,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from implicit_decision_gate.policy import CoverageManifest
 from implicit_decision_gate.scenario import (
     DecisionSpec,
+    EffectDisposition,
     ObservationResult,
+    ScenarioPolicySnapshot,
     decision_by_id,
     option_by_id,
 )
@@ -48,6 +51,24 @@ class ModelRole(StrEnum):
 
     CODING_AGENT = "CODING_AGENT"
     EVIDENCE_REVIEWER = "EVIDENCE_REVIEWER"
+
+
+class FailureCategory(StrEnum):
+    """Durable failure categories separate from product and coverage decisions."""
+
+    EXECUTION_FAILURE = "EXECUTION_FAILURE"
+    INVARIANT_VIOLATION = "INVARIANT_VIOLATION"
+    FORBIDDEN_EFFECT = "FORBIDDEN_EFFECT"
+    DECISION_MISMATCH = "DECISION_MISMATCH"
+    POLICY_FAILURE = "POLICY_FAILURE"
+
+
+class CoverageGapCategory(StrEnum):
+    """Reasons that observed evidence couldn't be fully classified."""
+
+    UNKNOWN_EFFECT = "UNKNOWN_EFFECT"
+    UNCLASSIFIED_EFFECT = "UNCLASSIFIED_EFFECT"
+    MISSING_COVERAGE = "MISSING_COVERAGE"
 
 
 def utc_now() -> datetime:
@@ -100,23 +121,41 @@ class AttemptRecord(BaseModel):
     coding_prompt: str | None = None
     artifact_digest: str | None = None
     observation: ObservationResult | None = None
+    effect_dispositions: list[EffectDisposition] = Field(default_factory=list)
+    coverage_manifest: CoverageManifest | None = None
     started_at: datetime = Field(default_factory=utc_now)
     completed_at: datetime | None = None
 
 
 class CoverageGapRecord(BaseModel):
-    """One observed outcome outside the approved surface vocabulary."""
+    """One unknown effect, unclassified effect, or missing coverage rule."""
 
-    decision_id: str
-    observed: str
+    category: CoverageGapCategory
+    surface_id: str
+    rule_id: str
+    description: str
     attempt_number: int
+    decision_id: str | None = None
+    effect_id: str | None = None
+
+
+class FailureRecord(BaseModel):
+    """Typed reason that a run entered FAILED."""
+
+    category: FailureCategory
+    stage: str
+    retryable: bool
+    message: str
 
 
 class RunRecord(BaseModel):
     """Complete durable state for one gate run."""
 
+    run_schema_version: int = 2
     run_id: str
     scenario_id: str
+    policy_snapshot: ScenarioPolicySnapshot
+    policy_digest: str
     state: RunState
     original_brief: str
     base_commit: str
@@ -124,6 +163,7 @@ class RunRecord(BaseModel):
     attempts: list[AttemptRecord] = Field(default_factory=list)
     decisions: list[DecisionRecord] = Field(default_factory=list)
     coverage_gaps: list[CoverageGapRecord] = Field(default_factory=list)
+    failure: FailureRecord | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -339,15 +379,11 @@ def decision_request_payloads(
 
 def coverage_gap_payloads(
     run: RunRecord,
-    decisions: tuple[DecisionSpec, ...],
 ) -> list[dict[str, Any]]:
     """Build platform-review events from persisted coverage gaps."""
 
     payloads: list[dict[str, Any]] = []
     for gap in run.coverage_gaps:
-        specification = decision_by_id(decisions, gap.decision_id)
-        if specification is None:
-            raise GateError(f"Unknown coverage-gap decision: {gap.decision_id}")
         attempt_index = gap.attempt_number - 1
         if attempt_index < 0 or attempt_index >= len(run.attempts):
             raise GateError(f"Unknown coverage-gap attempt: {gap.attempt_number}")
@@ -359,9 +395,12 @@ def coverage_gap_payloads(
                 "run_id": run.run_id,
                 "scenario": run.scenario_id,
                 "base_commit": run.base_commit,
+                "category": gap.category,
+                "surface_id": gap.surface_id,
+                "rule_id": gap.rule_id,
+                "description": gap.description,
                 "decision_id": gap.decision_id,
-                "question": specification.question,
-                "observed": gap.observed,
+                "effect_id": gap.effect_id,
                 "attempt_number": gap.attempt_number,
                 "facts": attempt.observation.facts,
                 "effects": [
@@ -377,7 +416,10 @@ def show_payload(run: RunRecord, decisions: tuple[DecisionSpec, ...]) -> dict[st
     """Build the stable CLI summary for a run."""
 
     observed = (
-        run.attempts[-1].observation.outcomes
+        {
+            decision.decision_id: decision.option_id
+            for decision in run.attempts[-1].observation.decisions
+        }
         if run.attempts and run.attempts[-1].observation
         else {}
     )
@@ -386,8 +428,10 @@ def show_payload(run: RunRecord, decisions: tuple[DecisionSpec, ...]) -> dict[st
         final_worktree_path = run.attempts[-1].worktree_path
     return {
         "run_id": run.run_id,
+        "run_schema_version": run.run_schema_version,
         "scenario": run.scenario_id,
         "state": run.state,
+        "policy_digest": run.policy_digest,
         "model_invocations": [
             invocation.model_dump(mode="json") for invocation in run.model_invocations
         ],
@@ -397,7 +441,28 @@ def show_payload(run: RunRecord, decisions: tuple[DecisionSpec, ...]) -> dict[st
             for decision in run.decisions
             if decision.reviewer_result is not None
         },
-        "coverage_gaps": coverage_gap_payloads(run, decisions),
+        "invariants": (
+            [
+                invariant.model_dump(mode="json")
+                for invariant in run.attempts[-1].observation.invariants
+            ]
+            if run.attempts and run.attempts[-1].observation
+            else []
+        ),
+        "effect_dispositions": (
+            [
+                disposition.model_dump(mode="json")
+                for disposition in run.attempts[-1].effect_dispositions
+            ]
+            if run.attempts
+            else []
+        ),
+        "coverage_manifest": (
+            run.attempts[-1].coverage_manifest.model_dump(mode="json")
+            if run.attempts and run.attempts[-1].coverage_manifest is not None
+            else None
+        ),
+        "coverage_gaps": coverage_gap_payloads(run),
         "decision_requests": decision_request_payloads(run, decisions),
         "owner_options": {
             decision.decision_id: decision.selected
@@ -406,6 +471,7 @@ def show_payload(run: RunRecord, decisions: tuple[DecisionSpec, ...]) -> dict[st
         },
         "attempt_digests": [attempt.artifact_digest for attempt in run.attempts],
         "final_worktree_path": final_worktree_path,
+        "failure": run.failure.model_dump(mode="json") if run.failure is not None else None,
         "error": run.error,
     }
 

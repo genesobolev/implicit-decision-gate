@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "generated_from": "The same typed contract as persisted RunRecord snapshots",
+  "runs": [
+    {
+      "id": "api-owner-decision",
+      "label": "Owner decision and verified retry",
+      "scenario": "workspace-export-authorization",
+      "state": "COMPLETED",
+      "summary": "The invariants pass, two unspecified behaviors need owner input, and a clean second attempt matches both selections.",
+      "policy_digest": "demo-api-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "artifact_digest": "api-attempt-1",
+          "invariants": [
+            {"invariant_id": "workspace_export_owner_first_request", "expected": "202 and one job", "observed": "202 and one job", "status": "PASSED"},
+            {"invariant_id": "workspace_export_member_denial", "expected": "403 and no job", "observed": "403 and no job", "status": "PASSED"}
+          ],
+          "decisions": [
+            {"decision_id": "workspace_export_administrator_access", "option_id": "OWNER_ONLY"},
+            {"decision_id": "workspace_export_repeat_request", "option_id": "REUSE_ACTIVE_EXPORT"}
+          ],
+          "coverage": [
+            {"rule_id": "api.owner_first_request", "status": "PASSED", "evidence_digest": "owner-evidence"},
+            {"rule_id": "api.member_denial", "status": "PASSED", "evidence_digest": "member-evidence"},
+            {"rule_id": "api.administrator_access", "status": "PASSED", "evidence_digest": "admin-evidence"},
+            {"rule_id": "api.owner_repeat_request", "status": "PASSED", "evidence_digest": "repeat-evidence"}
+          ]
+        },
+        {
+          "number": 2,
+          "artifact_digest": "api-attempt-2",
+          "invariants": [
+            {"invariant_id": "workspace_export_owner_first_request", "expected": "202 and one job", "observed": "202 and one job", "status": "PASSED"},
+            {"invariant_id": "workspace_export_member_denial", "expected": "403 and no job", "observed": "403 and no job", "status": "PASSED"}
+          ],
+          "decisions": [
+            {"decision_id": "workspace_export_administrator_access", "option_id": "OWNER_ONLY"},
+            {"decision_id": "workspace_export_repeat_request", "option_id": "REUSE_ACTIVE_EXPORT"}
+          ],
+          "coverage": [
+            {"rule_id": "api.owner_first_request", "status": "PASSED", "evidence_digest": "owner-evidence-2"},
+            {"rule_id": "api.member_denial", "status": "PASSED", "evidence_digest": "member-evidence-2"},
+            {"rule_id": "api.administrator_access", "status": "PASSED", "evidence_digest": "admin-evidence-2"},
+            {"rule_id": "api.owner_repeat_request", "status": "PASSED", "evidence_digest": "repeat-evidence-2"}
+          ]
+        }
+      ],
+      "decisions": [
+        {"decision_id": "workspace_export_administrator_access", "observed": "OWNER_ONLY", "reviewer_prompt": "Review administrator access", "reviewer_result": {"classification": "NOT_EVIDENCED"}, "selected": "OWNER_ONLY"},
+        {"decision_id": "workspace_export_repeat_request", "observed": "REUSE_ACTIVE_EXPORT", "reviewer_prompt": "Review repeat behavior", "reviewer_result": {"classification": "NOT_EVIDENCED"}, "selected": "REUSE_ACTIVE_EXPORT"}
+      ]
+    },
+    {
+      "id": "api-supported",
+      "label": "Brief already supports the choices",
+      "scenario": "workspace-export-authorization",
+      "state": "COMPLETED",
+      "summary": "Both decision observations are explicitly supported, so no owner pause or retry is needed.",
+      "policy_digest": "demo-api-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "invariants": [
+            {"invariant_id": "workspace_export_owner_first_request", "expected": "202 and one job", "observed": "202 and one job", "status": "PASSED"},
+            {"invariant_id": "workspace_export_member_denial", "expected": "403 and no job", "observed": "403 and no job", "status": "PASSED"}
+          ],
+          "decisions": [
+            {"decision_id": "workspace_export_administrator_access", "option_id": "OWNER_ONLY"},
+            {"decision_id": "workspace_export_repeat_request", "option_id": "CREATE_ANOTHER_EXPORT"}
+          ],
+          "coverage": [
+            {"rule_id": "api.owner_first_request", "status": "PASSED", "evidence_digest": "owner-evidence"},
+            {"rule_id": "api.member_denial", "status": "PASSED", "evidence_digest": "member-evidence"},
+            {"rule_id": "api.administrator_access", "status": "PASSED", "evidence_digest": "admin-evidence"},
+            {"rule_id": "api.owner_repeat_request", "status": "PASSED", "evidence_digest": "repeat-evidence"}
+          ]
+        }
+      ],
+      "decisions": [
+        {"decision_id": "workspace_export_administrator_access", "observed": "OWNER_ONLY", "reviewer_prompt": "Review administrator access", "reviewer_result": {"classification": "SUPPORTED"}},
+        {"decision_id": "workspace_export_repeat_request", "observed": "CREATE_ANOTHER_EXPORT", "reviewer_prompt": "Review repeat behavior", "reviewer_result": {"classification": "SUPPORTED"}}
+      ]
+    },
+    {
+      "id": "api-invariant-violation",
+      "label": "Authoritative invariant violated",
+      "scenario": "workspace-export-authorization",
+      "state": "FAILED",
+      "summary": "Member access is forbidden by the brief. It fails directly and is never presented as an owner choice.",
+      "policy_digest": "demo-api-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "invariants": [
+            {"invariant_id": "workspace_export_owner_first_request", "expected": "202 and one job", "observed": "202 and one job", "status": "PASSED"},
+            {"invariant_id": "workspace_export_member_denial", "expected": "403 and no job", "observed": "202 and one job", "status": "VIOLATED"}
+          ],
+          "decisions": [
+            {"decision_id": "workspace_export_administrator_access", "option_id": "OWNER_ONLY"},
+            {"decision_id": "workspace_export_repeat_request", "option_id": "REUSE_ACTIVE_EXPORT"}
+          ],
+          "coverage": [
+            {"rule_id": "api.owner_first_request", "status": "PASSED", "evidence_digest": "owner-evidence"},
+            {"rule_id": "api.member_denial", "status": "PASSED", "evidence_digest": "member-evidence"}
+          ]
+        }
+      ],
+      "failure": {"category": "INVARIANT_VIOLATION", "stage": "observation", "retryable": false, "message": "Invariant workspace_export_member_denial was violated."}
+    },
+    {
+      "id": "api-missing-observer",
+      "label": "Required observer result missing",
+      "scenario": "workspace-export-authorization",
+      "state": "COVERAGE_GAP",
+      "summary": "The member probe did not attest. The gate records missing coverage instead of treating absence as success.",
+      "policy_digest": "demo-api-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "invariants": [
+            {"invariant_id": "workspace_export_owner_first_request", "expected": "202 and one job", "observed": "202 and one job", "status": "PASSED"},
+            {"invariant_id": "workspace_export_member_denial", "expected": "403 and no job", "observed": "403 and no job", "status": "PASSED"}
+          ],
+          "coverage": [
+            {"rule_id": "api.owner_first_request", "status": "PASSED", "evidence_digest": "owner-evidence"},
+            {"rule_id": "api.member_denial", "status": "MISSING"}
+          ]
+        }
+      ],
+      "coverage_gaps": [
+        {"category": "MISSING_COVERAGE", "surface_id": "workspace_export_api", "rule_id": "api.member_denial", "description": "Required observer coverage is missing.", "attempt_number": 1}
+      ]
+    },
+    {
+      "id": "api-verification-mismatch",
+      "label": "Clean retry does not match",
+      "scenario": "workspace-export-authorization",
+      "state": "FAILED",
+      "summary": "Attempt two regenerates a different repeat policy, so exact verification fails.",
+      "policy_digest": "demo-api-policy-v2",
+      "attempts": [
+        {"number": 1, "decisions": [{"decision_id": "workspace_export_repeat_request", "option_id": "REUSE_ACTIVE_EXPORT"}]},
+        {"number": 2, "decisions": [{"decision_id": "workspace_export_repeat_request", "option_id": "CREATE_ANOTHER_EXPORT"}]}
+      ],
+      "decisions": [
+        {"decision_id": "workspace_export_repeat_request", "observed": "REUSE_ACTIVE_EXPORT", "reviewer_prompt": "Review repeat behavior", "reviewer_result": {"classification": "NOT_EVIDENCED"}, "selected": "REUSE_ACTIVE_EXPORT"}
+      ],
+      "failure": {"category": "DECISION_MISMATCH", "stage": "verification", "retryable": false, "message": "Attempt two did not reproduce the selected decision set."}
+    },
+    {
+      "id": "db-owner-decision",
+      "label": "Database rollout decision",
+      "scenario": "share-link-expiration",
+      "state": "AWAITING_OWNER",
+      "summary": "Required shape, new-row behavior, and rollback pass. Existing-row rollout remains an owner choice.",
+      "policy_digest": "demo-postgres-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "invariants": [
+            {"invariant_id": "share_link_expiration_column_shape", "expected": "timestamptz, nullable, 30-day default", "observed": "timestamptz, nullable, 30-day default", "status": "PASSED"},
+            {"invariant_id": "share_link_new_link_expiration", "expected": "about 30 days", "observed": "about 30 days", "status": "PASSED"},
+            {"invariant_id": "share_link_probe_rollback", "expected": "transaction rolled back", "observed": "transaction rolled back", "status": "PASSED"}
+          ],
+          "decisions": [{"decision_id": "existing_item_sharing_link_rollout", "option_id": "PRESERVE_EXISTING"}],
+          "effect_dispositions": [
+            {"effect_id": "expires-column", "effect": {"rule_id": "schema_shape", "change": "ADDED", "object_kind": "column", "identity": "public.share_links.expires_at", "attribute": "data_type", "after": "timestamp with time zone"}, "status": "EXPECTED", "policy_id": "share_link_expiration_effect_policy", "policy_version": "1", "reason": "The brief requires the expiration column."}
+          ],
+          "coverage": [
+            {"rule_id": "postgres.expiration_column_shape", "status": "PASSED", "evidence_digest": "shape-evidence"},
+            {"rule_id": "postgres.new_link_expiration", "status": "PASSED", "evidence_digest": "new-row-evidence"},
+            {"rule_id": "postgres.existing_link_rollout", "status": "PASSED", "evidence_digest": "existing-row-evidence"},
+            {"rule_id": "postgres.schema_shape", "status": "PASSED", "evidence_digest": "schema-evidence"},
+            {"rule_id": "postgres.data_integrity", "status": "PASSED", "evidence_digest": "integrity-evidence"},
+            {"rule_id": "postgres.indexing", "status": "PASSED", "evidence_digest": "index-evidence"},
+            {"rule_id": "postgres.rollback", "status": "PASSED", "evidence_digest": "rollback-evidence"}
+          ]
+        }
+      ],
+      "decisions": [
+        {"decision_id": "existing_item_sharing_link_rollout", "observed": "PRESERVE_EXISTING", "reviewer_prompt": "Review existing-link rollout", "reviewer_result": {"classification": "NOT_EVIDENCED"}}
+      ]
+    },
+    {
+      "id": "db-forbidden-effect",
+      "label": "Forbidden structural effect",
+      "scenario": "share-link-expiration",
+      "state": "FAILED",
+      "summary": "A removed column is explicitly forbidden by policy, even if the requested expiration behavior also works.",
+      "policy_digest": "demo-postgres-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "effect_dispositions": [
+            {"effect_id": "removed-owner", "effect": {"rule_id": "schema_shape", "change": "REMOVED", "object_kind": "column", "identity": "public.share_links.owner_id", "attribute": "data_type", "before": "uuid"}, "status": "FORBIDDEN", "policy_id": "share_link_expiration_effect_policy", "policy_version": "1", "reason": "The expiration change is not authorized to remove existing structure."}
+          ],
+          "coverage": [{"rule_id": "postgres.schema_shape", "status": "PASSED", "evidence_digest": "schema-evidence"}]
+        }
+      ],
+      "failure": {"category": "FORBIDDEN_EFFECT", "stage": "effect_policy", "retryable": false, "message": "One observed structural effect is forbidden."}
+    },
+    {
+      "id": "db-unclassified-effect",
+      "label": "Unclassified structural effect",
+      "scenario": "share-link-expiration",
+      "state": "COVERAGE_GAP",
+      "summary": "A new index was observed but no approved policy owns it. The evidence is preserved for platform review.",
+      "policy_digest": "demo-postgres-policy-v2",
+      "attempts": [
+        {
+          "number": 1,
+          "effect_dispositions": [
+            {"effect_id": "new-index", "effect": {"rule_id": "indexing", "change": "ADDED", "object_kind": "index", "identity": "public.share_links_expiration_idx", "attribute": "unique", "after": false}, "status": "UNCLASSIFIED", "reason": "No approved effect policy classified this observed change."}
+          ],
+          "coverage": [{"rule_id": "postgres.indexing", "status": "PASSED", "evidence_digest": "index-evidence"}]
+        }
+      ],
+      "coverage_gaps": [
+        {"category": "UNCLASSIFIED_EFFECT", "surface_id": "indexing", "rule_id": "indexing", "description": "No approved effect policy classified the new index.", "attempt_number": 1, "effect_id": "new-index"}
+      ]
+    },
+    {
+      "id": "db-attempt-two-side-effect",
+      "label": "Attempt-two side effect",
+      "scenario": "share-link-expiration",
+      "state": "COVERAGE_GAP",
+      "summary": "Decision verification cannot hide a new side effect. Attempt two is evaluated through the full invariant, effect, and coverage pipeline.",
+      "policy_digest": "demo-postgres-policy-v2",
+      "attempts": [
+        {"number": 1, "decisions": [{"decision_id": "existing_item_sharing_link_rollout", "option_id": "PRESERVE_EXISTING"}]},
+        {
+          "number": 2,
+          "decisions": [{"decision_id": "existing_item_sharing_link_rollout", "option_id": "PRESERVE_EXISTING"}],
+          "effect_dispositions": [
+            {"effect_id": "new-index-on-retry", "effect": {"rule_id": "indexing", "change": "ADDED", "object_kind": "index", "identity": "public.share_links_expiration_idx", "attribute": "unique", "after": false}, "status": "UNCLASSIFIED", "reason": "No approved effect policy classified this observed change."}
+          ]
+        }
+      ],
+      "decisions": [
+        {"decision_id": "existing_item_sharing_link_rollout", "observed": "PRESERVE_EXISTING", "reviewer_prompt": "Review existing-link rollout", "reviewer_result": {"classification": "NOT_EVIDENCED"}, "selected": "PRESERVE_EXISTING"}
+      ],
+      "coverage_gaps": [
+        {"category": "UNCLASSIFIED_EFFECT", "surface_id": "indexing", "rule_id": "indexing", "description": "Attempt two introduced an unclassified index.", "attempt_number": 2, "effect_id": "new-index-on-retry"}
+      ]
+    }
+  ]
+}

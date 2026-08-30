@@ -5,30 +5,46 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from implicit_decision_gate.agent import AgentError
 from implicit_decision_gate.api_probe import (
-    ADMINISTRATOR_ACCESS,
     CREATE_ANOTHER_EXPORT,
     OWNER_AND_ADMIN,
     OWNER_ONLY,
-    REPEAT_REQUEST,
     REUSE_ACTIVE_EXPORT,
+    AuthorizationObservation,
+    RoleResult,
+    normalize_authorization,
 )
 from implicit_decision_gate.gate import (
     ModelInvocationRecord,
     ModelRole,
     ReviewerResult,
 )
+from implicit_decision_gate.policy import coverage_evidence_digest
 from implicit_decision_gate.probe import (
-    EXISTING_LINK_ROLLOUT,
     EXPIRE_EXISTING,
+    POSTGRES_INDEXING_COVERAGE,
+    POSTGRES_INTEGRITY_COVERAGE,
+    POSTGRES_ROLLBACK_COVERAGE,
+    POSTGRES_SCHEMA_COVERAGE,
     PRESERVE_EXISTING,
+    ROLLBACK_INVARIANT,
+    Observation,
+    normalize_observation,
 )
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult, Scenario
+from implicit_decision_gate.scenario import (
+    CoverageResult,
+    CoverageStatus,
+    InvariantResult,
+    InvariantStatus,
+    ObservationResult,
+    Scenario,
+)
 from implicit_decision_gate.scenarios import scenario_registry
 
 BRIEF = """Add 30-day expiration support to item-sharing links.
@@ -178,44 +194,74 @@ class ScriptMarkerProbe:
     def observe(self, artifact: str, context: str) -> ObservationResult:
         self.calls += 1
         if "create_export" in context:
-            administrator = UNMODELED_OUTCOME
+            administrator = RoleResult(status=500, jobs_created=0)
             if OWNER_AND_ADMIN in artifact:
-                administrator = OWNER_AND_ADMIN
+                administrator = RoleResult(status=202, jobs_created=1)
             elif OWNER_ONLY in artifact:
-                administrator = OWNER_ONLY
-            repeat = UNMODELED_OUTCOME
+                administrator = RoleResult(status=403, jobs_created=0)
+            repeat = RoleResult(status=500, jobs_created=0)
             if CREATE_ANOTHER_EXPORT in artifact:
-                repeat = CREATE_ANOTHER_EXPORT
+                repeat = RoleResult(status=202, jobs_created=1)
             elif REUSE_ACTIVE_EXPORT in artifact:
-                repeat = REUSE_ACTIVE_EXPORT
-            return ObservationResult(
-                outcomes={
-                    ADMINISTRATOR_ACCESS: administrator,
-                    REPEAT_REQUEST: repeat,
-                }
+                repeat = RoleResult(status=202, jobs_created=0)
+            return normalize_authorization(
+                AuthorizationObservation(
+                    owner=RoleResult(status=202, jobs_created=1),
+                    repeat_owner=repeat,
+                    administrator=administrator,
+                    member=RoleResult(status=403, jobs_created=0),
+                )
             )
+        migration_time = datetime.now(UTC)
         if PRESERVE_EXISTING in artifact:
             assert "share_links" in context
-            option = PRESERVE_EXISTING
-            existing = "null"
+            existing_expiration = None
         elif EXPIRE_EXISTING in artifact:
             assert "share_links" in context
-            option = EXPIRE_EXISTING
-            existing = "approximately_migration_time_plus_30_days"
+            existing_expiration = migration_time + timedelta(days=30)
         else:
-            option = UNMODELED_OUTCOME
-            existing = "other"
-        return ObservationResult(
-            outcomes={EXISTING_LINK_ROLLOUT: option},
-            facts={
-                "data_type": "timestamp with time zone",
-                "nullable": True,
-                "column_default": "CURRENT_TIMESTAMP + interval '30 days'",
-                "insert_without_value": "approximately_now_plus_30_days",
-                "existing_row": existing,
-                "rollback_verified": True,
-            },
+            existing_expiration = migration_time + timedelta(days=15)
+        result = normalize_observation(
+            Observation(
+                data_type="timestamp with time zone",
+                nullable=True,
+                column_default="CURRENT_TIMESTAMP + interval '30 days'",
+                existing_row_found=True,
+                existing_expiration=existing_expiration,
+                inserted_row_created=True,
+                inserted_expiration=migration_time + timedelta(days=30),
+                migration_time=migration_time,
+            )
         )
+        result.facts["rollback_verified"] = True
+        rollback_evidence = {"rollback_verified": True}
+        result.invariants.append(
+            InvariantResult(
+                invariant_id=ROLLBACK_INVARIANT,
+                expected="The disposable migration transaction is fully rolled back.",
+                observed="rollback_verified=True",
+                status=InvariantStatus.PASSED,
+                evidence=rollback_evidence,
+            )
+        )
+        for rule_id in (
+            POSTGRES_SCHEMA_COVERAGE,
+            POSTGRES_INTEGRITY_COVERAGE,
+            POSTGRES_INDEXING_COVERAGE,
+            POSTGRES_ROLLBACK_COVERAGE,
+        ):
+            result.coverage.append(
+                CoverageResult(
+                    rule_id=rule_id,
+                    status=CoverageStatus.PASSED,
+                    evidence_digest=coverage_evidence_digest(
+                        rollback_evidence
+                        if rule_id == POSTGRES_ROLLBACK_COVERAGE
+                        else {"effects": ""}
+                    ),
+                )
+            )
+        return result
 
 
 def scripted_scenarios(observer: ScriptMarkerProbe) -> dict[str, Scenario]:

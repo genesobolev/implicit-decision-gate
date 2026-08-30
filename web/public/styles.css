@@ -475,7 +475,7 @@ label:has(input:focus-visible) {
     left: 385px;
 }
 
-.workflow-node[data-workflow-node="outcomes"] {
+.workflow-node[data-workflow-node="policy"] {
     top: 245px;
     left: 565px;
 }
@@ -871,6 +871,75 @@ label:has(input:focus-visible) {
 .replay-route-switch button:focus-visible {
     position: relative;
     z-index: 1;
+}
+
+.robustness-routes {
+    border-bottom: 1px solid var(--border);
+    background: #fbfcff;
+}
+
+.robustness-routes > summary {
+    width: fit-content;
+    padding: 11px 20px;
+    color: var(--text-soft);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.robustness-routes > summary:hover {
+    color: var(--brand-blue-deep);
+}
+
+.robustness-routes > summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
+}
+
+.robustness-routes > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 20px 14px;
+}
+
+.robustness-routes p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.robustness-route-switch {
+    display: flex;
+    max-width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.robustness-route-switch button {
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface);
+    color: var(--text-soft);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.robustness-route-switch button:hover {
+    border-color: #b9a7e5;
+    background: var(--violet-soft);
+    color: var(--violet);
+}
+
+.robustness-route-switch button[aria-pressed="true"] {
+    border-color: var(--violet);
+    background: var(--violet);
+    color: #ffffff;
 }
 
 .stage-rail {
@@ -1364,7 +1433,7 @@ code {
     background: var(--green);
 }
 
-.outcome-strip {
+.decision-observation-strip {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1px;
@@ -1375,11 +1444,11 @@ code {
     background: #cbd9ef;
 }
 
-.outcome-strip-single {
+.decision-observation-strip-single {
     grid-template-columns: 1fr;
 }
 
-.outcome-strip > div {
+.decision-observation-strip > div {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1388,12 +1457,12 @@ code {
     background: var(--brand-blue-soft);
 }
 
-.outcome-strip span {
+.decision-observation-strip span {
     color: var(--text-soft);
     font-size: 12px;
 }
 
-.outcome-strip strong {
+.decision-observation-strip strong {
     color: var(--brand-blue-deep);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;
@@ -1884,6 +1953,151 @@ code {
     padding-left: 18px;
 }
 
+.stage-policy-details {
+    margin-top: 20px;
+    border: 1px solid #cbd9ef;
+    border-radius: 10px;
+    background: #fbfcff;
+}
+
+.stage-policy-details summary {
+    padding: 12px 15px;
+    color: var(--intrepid-blue);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.stage-policy-details summary:hover {
+    color: var(--brand-blue-deep);
+}
+
+.stage-policy-details summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
+}
+
+.stage-policy-details > p {
+    margin: 0;
+    padding: 0 15px 15px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.policy-assessment-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 15px 12px;
+}
+
+.policy-assessment-grid article {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.policy-assessment-grid span {
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.policy-assessment-grid strong {
+    color: var(--intrepid-blue);
+    font-size: 11px;
+}
+
+.policy-alert {
+    display: grid;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.policy-alert > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.policy-alert > div:first-child > strong {
+    color: var(--intrepid-blue);
+    font-size: 14px;
+}
+
+.policy-alert > code {
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.policy-alert p {
+    margin: 0;
+    color: var(--text-soft);
+    font-size: 12px;
+}
+
+.policy-alert dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+.policy-alert dl > div {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 12px;
+}
+
+.policy-alert dt {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.policy-alert dd {
+    margin: 0;
+    color: var(--intrepid-blue);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.policy-alert-failed {
+    border-color: #e4b8b2;
+    background: var(--red-soft);
+}
+
+.policy-alert-gap {
+    border-color: #cbbdea;
+    background: var(--violet-soft);
+}
+
+.policy-alert-terminal {
+    max-width: 820px;
+    margin-right: auto;
+    margin-left: auto;
+}
+
+.completion-banner-gap {
+    border-color: #cbbdea;
+    background: var(--violet-soft);
+}
+
+.completion-banner-gap .completion-check {
+    background: var(--violet);
+}
+
 .stage-actions {
     display: flex;
     align-items: center;
@@ -2326,6 +2540,10 @@ noscript {
     .demo-toolbar {
         align-items: stretch;
     }
+
+    .policy-assessment-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 680px) {
@@ -2435,6 +2653,26 @@ noscript {
         width: 100%;
     }
 
+    .robustness-routes > div {
+        display: grid;
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .robustness-route-switch {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .policy-assessment-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .policy-alert dl > div {
+        grid-template-columns: 1fr;
+        gap: 3px;
+    }
+
     .replay-path {
         grid-template-columns: 1fr;
         gap: 6px;
@@ -2477,7 +2715,7 @@ noscript {
         display: none;
     }
 
-    .outcome-strip {
+    .decision-observation-strip {
         grid-template-columns: 1fr;
     }
 

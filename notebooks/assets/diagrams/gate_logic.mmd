@@ -1,22 +1,26 @@
 flowchart TD
-    observed[Observer returns normalized outcomes]
-    covered{Every outcome matches approved coverage}
+    observed[Observer returns typed attempt evidence]
+    safe{Invariants and effect policy pass}
+    covered{Coverage complete and decisions recognized}
+    failed[FAILED]
     coverageGap[COVERAGE_GAP event]
     platform[Later platform engineering review]
-    review[Review each outcome against the brief]
+    review[Review each owner decision against the brief]
     result{Aggregate review result}
     pause[One AWAITING_OWNER pause]
     answered{All requested decisions answered}
     ready[READY_TO_RESUME]
     retry[One fresh coding attempt]
-    observeAgain[Observer checks regenerated artifact]
-    verify{Every expected outcome matches}
+    observeAgain[Observer repeats every declared check]
+    verify{Policy passes and selected decisions match}
     completeFirst[COMPLETED]
     failedReview[FAILED]
     completeSecond[COMPLETED]
-    failedRetry[FAILED]
+    failedRetry[FAILED or COVERAGE_GAP]
 
-    observed --> covered
+    observed --> safe
+    safe -->|No| failed
+    safe -->|Yes| covered
     covered -->|No| coverageGap
     coverageGap -.-> platform
     covered -->|Yes| review

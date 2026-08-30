@@ -20,22 +20,44 @@ const supportedSteps = [
     { id: "review", label: "Review complete" },
 ];
 
+const robustnessSteps = [
+    { id: "brief", label: "Brief" },
+    { id: "observe", label: "Observe" },
+    { id: "robust", label: "Policy result" },
+];
+
 const replayRoutes = {
     owner: {
         steps: normalSteps,
-        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "completed_verified"],
+        nodes: ["started", "attempt1", "observe1", "policy", "review", "awaiting_owner", "ready", "attempt2", "verify", "completed_verified"],
     },
     supported: {
         steps: supportedSteps,
-        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "completed_first"],
+        nodes: ["started", "attempt1", "observe1", "policy", "review", "completed_first"],
     },
     gap: {
         steps: gapSteps,
-        nodes: ["started", "attempt1", "observe1", "outcomes", "coverage_gap"],
+        nodes: ["started", "attempt1", "observe1", "policy", "coverage_gap"],
     },
     verification_failure: {
         steps: normalSteps,
-        nodes: ["started", "attempt1", "observe1", "outcomes", "review", "awaiting_owner", "ready", "attempt2", "verify", "failed"],
+        nodes: ["started", "attempt1", "observe1", "policy", "review", "awaiting_owner", "ready", "attempt2", "verify", "failed"],
+    },
+    invariant_violation: {
+        steps: robustnessSteps,
+        nodes: ["started", "attempt1", "observe1", "policy", "failed"],
+    },
+    forbidden_effect: {
+        steps: robustnessSteps,
+        nodes: ["started", "attempt1", "observe1", "policy", "failed"],
+    },
+    missing_coverage: {
+        steps: robustnessSteps,
+        nodes: ["started", "attempt1", "observe1", "policy", "coverage_gap"],
+    },
+    attempt2_unclassified: {
+        steps: normalSteps,
+        nodes: ["started", "attempt1", "observe1", "policy", "review", "awaiting_owner", "ready", "attempt2", "verify", "coverage_gap"],
     },
 };
 
@@ -82,22 +104,22 @@ const workflowNodes = [
         state: "STARTED",
         tone: "normal",
         summary: "A bounded observer records system effects without relying on the coding model's explanation.",
-        persists: ["Normalized facts", "Observed effects", "Typed outcomes", "Attempt completion time"],
+        persists: ["Invariant results", "Decision observations", "Unknown effects", "Coverage attestations"],
         facts: {
             api: ["Owner called twice with shared state", "Administrator and member called once"],
             database: ["Existing row seeded before migration", "New row inserted and probe rolled back"],
         },
     },
     {
-        id: "outcomes",
-        title: "Validate outcomes",
+        id: "policy",
+        title: "Evaluate policy",
         state: "STARTED",
         tone: "normal",
-        summary: "The gate checks that every declared decision has exactly one covered or unmodeled outcome.",
-        persists: ["Outcome identifiers", "Coverage-gap facts when present", "Validation error when invalid"],
+        summary: "The gate checks invariants, effect dispositions, required coverage, and then typed decision observations.",
+        persists: ["Policy snapshot and digest", "Invariant results", "Effect dispositions", "Coverage manifest", "Decision observations"],
         facts: {
-            api: ["Administrator access outcome", "Repeated owner request outcome"],
-            database: ["Existing-link expiration outcome", "New-link expiration remains required"],
+            api: ["Owner and member behavior are invariants", "Administrator and repeat behavior are owner decisions"],
+            database: ["Required shape and new-link behavior are invariants", "Existing-link rollout is the owner decision"],
         },
     },
     {
@@ -105,11 +127,11 @@ const workflowNodes = [
         title: "Coverage gap",
         state: "COVERAGE_GAP",
         tone: "gap",
-        summary: "An unmodeled first-attempt effect ends the product workflow without becoming a human product decision.",
+        summary: "An unknown effect, unclassified effect, or missing required observation stops the product workflow without becoming a human decision.",
         persists: ["Coverage-gap record", "Normalized facts and effects", "Artifact digest", "Attempt number"],
         facts: {
-            api: ["Example: repeated owner request returns an unsupported result", "No evidence review or owner request runs"],
-            database: ["Example: a new link doesn't receive required expiration", "No evidence review or owner request runs"],
+            api: ["Example: repeated owner behavior produces an UnknownEffect", "Missing required observer coverage takes the same safe route"],
+            database: ["Example: an observed structural effect has no approved classification", "Attempt two uses this same route when policy coverage is incomplete"],
         },
     },
     {
@@ -168,17 +190,17 @@ const workflowNodes = [
         summary: "A clean coding process receives the original inputs and completed decision set.",
         persists: ["Second clean worktree", "Prompt with owner decisions", "Second artifact digest", "Model provenance"],
         facts: {
-            api: ["Receives both selected API outcomes", "Doesn't receive attempt one's artifact"],
+            api: ["Receives both selected API decisions", "Doesn't receive attempt one's artifact"],
             database: ["Receives the selected rollout policy", "Doesn't receive attempt one's migration"],
         },
     },
     {
         id: "verify",
-        title: "Verify outcomes",
+        title: "Re-observe and verify",
         state: "READY_TO_RESUME",
         tone: "normal",
-        summary: "The same observer compares every fresh outcome with the complete expected decision set.",
-        persists: ["Second observation", "Expected and observed outcomes", "Coverage event for second-attempt UNMODELED"],
+        summary: "Attempt two repeats the full policy evaluation before its fresh decision observations are compared with the selected set.",
+        persists: ["Second observation", "Invariant results", "Effect dispositions", "Coverage manifest", "Decision comparison"],
         facts: {
             api: ["Selected answers override unsupported attempt-one choices", "Supported choices retain their observed value"],
             database: ["Existing-link policy must match the answer", "New links must still expire after 30 days"],
@@ -189,7 +211,7 @@ const workflowNodes = [
         title: "Verified complete",
         state: "COMPLETED",
         tone: "complete",
-        summary: "The run completes only when the fresh artifact matches every expected outcome.",
+        summary: "The run completes only when the fresh artifact passes policy and matches every selected decision.",
         persists: ["Both attempt records", "Verified decision set", "COMPLETED state"],
         facts: {
             api: ["Administrator behavior matches", "Repeated owner behavior matches"],
@@ -204,8 +226,8 @@ const workflowNodes = [
         summary: "The gate records a terminal failure when execution, evidence, or verification violates the workflow contract.",
         persists: ["Failure message", "Available attempt evidence", "Artifact digest when available", "FAILED state"],
         facts: {
-            api: ["Examples: container error or mismatched API outcome", "A second-attempt UNMODELED result is a mismatch"],
-            database: ["Examples: invalid migration or mismatched row effect", "A second-attempt UNMODELED result is a mismatch"],
+            api: ["Examples: container error, invariant violation, or decision mismatch", "Unknown effects and missing coverage route to COVERAGE_GAP"],
+            database: ["Examples: invalid migration, forbidden effect, or decision mismatch", "Unclassified effects route to COVERAGE_GAP on either attempt"],
         },
     },
 ];
@@ -213,10 +235,10 @@ const workflowNodes = [
 const workflowRoutes = [
     { from: "started", to: "attempt1", path: "M185 281 L205 281", label: "", x: 195, y: 265, tone: "normal" },
     { from: "attempt1", to: "observe1", path: "M365 281 L385 281", label: "", x: 375, y: 265, tone: "normal" },
-    { from: "observe1", to: "outcomes", path: "M545 281 L565 281", label: "", x: 555, y: 265, tone: "normal" },
-    { from: "outcomes", to: "review", path: "M725 281 L745 281", label: "", x: 735, y: 265, tone: "normal" },
-    { from: "outcomes", to: "coverage_gap", path: "M645 245 L645 102", label: "UNMODELED", x: 645, y: 174, tone: "gap" },
-    { from: "outcomes", to: "failed", path: "M645 317 L645 625", label: "Invalid outcome set", x: 645, y: 472, tone: "failed" },
+    { from: "observe1", to: "policy", path: "M545 281 L565 281", label: "", x: 555, y: 265, tone: "normal" },
+    { from: "policy", to: "review", path: "M725 281 L745 281", label: "Policy passes", x: 735, y: 225, tone: "normal" },
+    { from: "policy", to: "coverage_gap", path: "M645 245 L645 102", label: "Unknown or missing", x: 645, y: 174, tone: "gap" },
+    { from: "policy", to: "failed", path: "M645 317 L645 625", label: "Invariant or forbidden", x: 645, y: 472, tone: "failed" },
     { from: "attempt1", to: "failed", path: "M285 317 L285 590 L605 590 L605 625", label: "Execution error", x: 400, y: 574, tone: "failed" },
     { from: "review", to: "completed_first", path: "M825 245 L825 102", label: "All supported", x: 825, y: 174, tone: "complete" },
     { from: "review", to: "awaiting_owner", path: "M905 281 L925 281", label: "Needs owner", x: 915, y: 225, tone: "owner" },
@@ -226,6 +248,7 @@ const workflowRoutes = [
     { from: "ready", to: "attempt2", path: "M1185 317 L1185 455", label: "Resume", x: 1185, y: 386, tone: "normal" },
     { from: "attempt2", to: "verify", path: "M1105 491 L1085 491", label: "Fresh result", x: 1095, y: 435, tone: "normal" },
     { from: "verify", to: "completed_verified", path: "M925 491 L905 491", label: "Exact match", x: 915, y: 435, tone: "complete" },
+    { from: "verify", to: "coverage_gap", path: "M1005 455 L1005 350 L555 350 L555 66 L565 66", label: "Coverage incomplete", x: 780, y: 334, tone: "gap" },
     { from: "attempt2", to: "failed", path: "M1185 527 L1185 606 L725 606 L725 661", label: "Execution error", x: 1090, y: 590, tone: "failed" },
     { from: "verify", to: "failed", path: "M1005 527 L1005 582 L705 582 L705 625", label: "Mismatch", x: 900, y: 566, tone: "failed" },
 ];
@@ -292,6 +315,7 @@ const workflowInspector = document.querySelector("#workflow-inspector");
 const walkthroughScenarioTabs = document.querySelector(".walkthrough-scenario-tabs");
 const scenarioName = document.querySelector("#scenario-name");
 const replayRouteTabs = document.querySelector(".replay-route-switch");
+const robustnessRouteTabs = document.querySelector(".robustness-route-switch");
 const replayPath = document.querySelector("#replay-path");
 const stageRail = document.querySelector("#stage-rail");
 const stageContent = document.querySelector("#stage-content");
@@ -466,6 +490,26 @@ function isVerificationFailureReplay() {
     return state.replayRoute === "verification_failure";
 }
 
+function isInvariantViolationReplay() {
+    return state.replayRoute === "invariant_violation";
+}
+
+function isForbiddenEffectReplay() {
+    return state.replayRoute === "forbidden_effect";
+}
+
+function isMissingCoverageReplay() {
+    return state.replayRoute === "missing_coverage";
+}
+
+function isAttemptTwoUnclassifiedReplay() {
+    return state.replayRoute === "attempt2_unclassified";
+}
+
+function isFirstAttemptRobustnessReplay() {
+    return isInvariantViolationReplay() || isForbiddenEffectReplay() || isMissingCoverageReplay();
+}
+
 function verificationHelp() {
     if (state.scenario === "database") {
         return "Choose an answer in step 4 to enable verification.";
@@ -475,7 +519,7 @@ function verificationHelp() {
 
 function replayActiveGraphNodes() {
     if (state.step === "brief") return ["started"];
-    if (state.step === "observe") return ["attempt1", "observe1", "outcomes"];
+    if (state.step === "observe") return ["attempt1", "observe1", "policy"];
     if (state.step === "review") {
         return isSupportedReplay() ? ["review", "completed_first"] : ["review"];
     }
@@ -483,7 +527,11 @@ function replayActiveGraphNodes() {
         return hasCompleteDecisionSet() ? ["ready"] : ["awaiting_owner"];
     }
     if (state.step === "gap") return ["coverage_gap"];
+    if (state.step === "robust") {
+        return [isMissingCoverageReplay() ? "coverage_gap" : "failed"];
+    }
     if (state.step === "verify") {
+        if (isAttemptTwoUnclassifiedReplay()) return ["attempt2", "verify", "coverage_gap"];
         return ["attempt2", "verify", isVerificationFailureReplay() ? "failed" : "completed_verified"];
     }
     return [];
@@ -540,8 +588,13 @@ function renderReplayRouteControls() {
         button.setAttribute("aria-pressed", String(button.dataset.replayRoute === state.replayRoute));
     });
     const selectedButton = replayRouteTabs.querySelector('[aria-pressed="true"]');
-    replayRouteTabs.scrollLeft = selectedButton.offsetLeft - replayRouteTabs.offsetLeft
-        - (replayRouteTabs.clientWidth - selectedButton.offsetWidth) / 2;
+    if (selectedButton) {
+        replayRouteTabs.scrollLeft = selectedButton.offsetLeft - replayRouteTabs.offsetLeft
+            - (replayRouteTabs.clientWidth - selectedButton.offsetWidth) / 2;
+    }
+    robustnessRouteTabs.querySelectorAll("[data-robustness-route]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.robustnessRoute === state.replayRoute));
+    });
 }
 
 function renderRail() {
@@ -618,24 +671,38 @@ function apiBriefStage() {
 
 function apiObservationRows() {
     const coverageGap = isCoverageGapReplay();
+    const invariantViolation = isInvariantViolationReplay();
+    const missingCoverage = isMissingCoverageReplay();
     const repeatStatus = coverageGap ? "200" : "202";
+    const memberStatus = invariantViolation ? "HTTP 202" : missingCoverage ? "NO RESULT" : "HTTP 403";
+    const memberJobs = invariantViolation ? "+1 job" : missingCoverage ? "observer missing" : "+0 jobs";
     return `
         <div class="observation-row"><span class="role-dot owner"></span><strong>Owner, first request</strong><code>HTTP 202</code><span>+1 job</span></div>
         <div class="observation-row ${coverageGap ? "row-warning" : ""}"><span class="role-dot repeat"></span><strong>Owner, repeated request</strong><code>HTTP ${repeatStatus}</code><span>+0 jobs</span></div>
         <div class="observation-row"><span class="role-dot admin"></span><strong>Administrator</strong><code>HTTP 403</code><span>+0 jobs</span></div>
-        <div class="observation-row"><span class="role-dot member"></span><strong>Member</strong><code>HTTP 403</code><span>+0 jobs</span></div>
+        <div class="observation-row ${invariantViolation || missingCoverage ? "row-warning" : ""}"><span class="role-dot member"></span><strong>Member</strong><code>${memberStatus}</code><span>${memberJobs}</span></div>
     `;
 }
 
 function apiObserveStage() {
     const coverageGap = isCoverageGapReplay();
-    const repeatOutcome = coverageGap ? "UNMODELED" : "REUSE_ACTIVE_EXPORT";
+    const repeatObservation = coverageGap ? "UnknownEffect" : "REUSE_ACTIVE_EXPORT";
+    const memberBranch = isInvariantViolationReplay()
+        ? '<div><span>Member invariant</span><strong class="text-warning">VIOLATED</strong></div>'
+        : isMissingCoverageReplay()
+            ? '<div><span>Member coverage</span><strong class="text-warning">MISSING</strong></div>'
+            : "";
+    const next = isFirstAttemptRobustnessReplay() ? "robust" : coverageGap ? "gap" : "review";
     return `
         ${stageHeading("OBSERVED", "blue", "The observer measures effects instead of asking the agent what it intended.")}
         <div class="split-grid split-observe">
             <article class="content-card code-panel">
                 <div class="card-top"><span>attempt-1.py</span></div>
                 <pre><code>def create_export(role, export_jobs):
+${isInvariantViolationReplay() ? `    if role == "member":
+        export_jobs.append("queued")
+        return 202
+` : ""}
     if role != "owner":
         return 403
     if export_jobs:
@@ -647,11 +714,12 @@ function apiObserveStage() {
                 <div class="observation-list">${apiObservationRows()}</div>
             </article>
         </div>
-        <div class="outcome-strip">
+        <div class="decision-observation-strip">
             <div><span>Administrator access</span><strong>OWNER_ONLY</strong></div>
-            <div><span>Repeated request</span><strong class="${coverageGap ? "text-warning" : ""}">${repeatOutcome}</strong></div>
+            <div><span>Repeated request</span><strong class="${coverageGap ? "text-warning" : ""}">${repeatObservation}</strong></div>
+            ${memberBranch}
         </div>
-        ${stageActions({ back: "brief", next: coverageGap ? "gap" : "review" })}
+        ${stageActions({ back: "brief", next })}
     `;
 }
 
@@ -779,7 +847,7 @@ function apiVerifyStage() {
     const expectedRepeat = `202 / +${repeatCreates ? "1" : "0"}`;
     const observedRepeat = failed ? `202 / +${repeatCreates ? "0" : "1"}` : expectedRepeat;
     return `
-        ${stageHeading(failed ? "FAILED" : "COMPLETED", failed ? "red" : "green", failed ? "The fresh result fails because one observed outcome doesn't match the selected decision." : "The same observer verifies every selected outcome on one fresh result.")}
+        ${stageHeading(failed ? "FAILED" : "COMPLETED", failed ? "red" : "green", failed ? "The fresh result fails because one decision observation doesn't match the selected decision." : "The same observer verifies every selected decision on one fresh result.")}
         ${verificationResultSwitch()}
         <div class="verification-layout">
             <article class="content-card">
@@ -794,7 +862,7 @@ function apiVerifyStage() {
                 <div class="verify-row"><span>Member</span>${verificationValues("403 / +0", "403 / +0")}${statusPill("MATCH", "green")}</div>
             </article>
         </div>
-        <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The repeated-owner outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh artifact." : "The verified artifact can return to the wider development loop."}</p></div></div>
+        <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The repeated-owner decision doesn't match." : "Every selected decision matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh artifact." : "The verified artifact can return to the wider development loop."}</p></div></div>
         ${stageActions({ back: "answer", terminal: true })}
     `;
 }
@@ -825,32 +893,49 @@ function databaseBriefStage() {
 
 function databaseObserveStage() {
     const coverageGap = isCoverageGapReplay();
-    const newExpiration = coverageGap ? "NULL" : "+30 days";
-    const outcome = coverageGap ? "UNMODELED" : "PRESERVE_EXISTING";
+    const forbiddenEffect = isForbiddenEffectReplay();
+    const existingExpiration = coverageGap ? "+7 days" : "NULL";
+    const decisionObservation = coverageGap ? "UnknownEffect" : "PRESERVE_EXISTING";
+    const migration = `ALTER TABLE share_links
+    ADD COLUMN expires_at timestamptz;
+
+ALTER TABLE share_links
+    ALTER COLUMN expires_at
+    SET DEFAULT (now() + interval '30 days');${coverageGap ? `
+
+UPDATE share_links
+    SET expires_at = now() + interval '7 days';` : ""}${forbiddenEffect ? `
+
+ALTER TABLE share_links
+    DROP COLUMN owner_id;` : ""}`;
+    const structuralDisposition = forbiddenEffect ? `
+        <article class="policy-alert policy-alert-failed">
+            <div>${statusPill("FORBIDDEN", "red")}<strong>Removed column</strong></div>
+            <code>public.share_links.owner_id</code>
+            <p>The expiration policy doesn't authorize removing existing structure.</p>
+        </article>
+    ` : "";
+    const next = forbiddenEffect ? "robust" : coverageGap ? "gap" : "review";
     return `
         ${stageHeading("OBSERVED", "blue", "The database probe measures row effects inside a rolled-back transaction.")}
         <div class="split-grid split-observe">
             <article class="content-card code-panel">
                 <div class="card-top"><span>attempt-1.sql</span></div>
-                <pre><code>ALTER TABLE share_links
-    ADD COLUMN expires_at timestamptz;
-
-${coverageGap ? "-- No default was added." : `ALTER TABLE share_links
-    ALTER COLUMN expires_at
-    SET DEFAULT (now() + interval '30 days');`}</code></pre>
+                <pre><code>${migration}</code></pre>
             </article>
             <article class="content-card">
                 <div class="observation-list">
-                    <div class="observation-row"><span class="role-dot existing"></span><strong>Existing link</strong><code>expires_at</code><span>NULL</span></div>
-                    <div class="observation-row ${coverageGap ? "row-warning" : ""}"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>${newExpiration}</span></div>
+                    <div class="observation-row ${coverageGap ? "row-warning" : ""}"><span class="role-dot existing"></span><strong>Existing link</strong><code>expires_at</code><span>${existingExpiration}</span></div>
+                    <div class="observation-row"><span class="role-dot created"></span><strong>New link</strong><code>expires_at</code><span>+30 days</span></div>
                     <div class="observation-row"><span class="role-dot rollback"></span><strong>Probe cleanup</strong><code>transaction</code><span>rolled back</span></div>
                 </div>
             </article>
         </div>
-        <div class="outcome-strip outcome-strip-single">
-            <div><span>Existing-link policy</span><strong class="${coverageGap ? "text-warning" : ""}">${outcome}</strong></div>
+        <div class="decision-observation-strip decision-observation-strip-single">
+            <div><span>Existing-link decision</span><strong class="${coverageGap ? "text-warning" : ""}">${decisionObservation}</strong></div>
         </div>
-        ${stageActions({ back: "brief", next: coverageGap ? "gap" : "review" })}
+        ${structuralDisposition}
+        ${stageActions({ back: "brief", next })}
     `;
 }
 
@@ -903,12 +988,37 @@ function databaseAnswerStage() {
 
 function databaseVerifyStage() {
     const failed = isVerificationFailureReplay();
+    const unclassifiedEffect = isAttemptTwoUnclassifiedReplay();
     const expiresExisting = state.expiration === "EXPIRE_EXISTING";
     const expectedExisting = expiresExisting ? "+30 days" : "NULL";
     const observedExisting = failed ? (expiresExisting ? "NULL" : "+30 days") : expectedExisting;
+    const terminalState = unclassifiedEffect ? "COVERAGE_GAP" : failed ? "FAILED" : "COMPLETED";
+    const terminalTone = unclassifiedEffect ? "violet" : failed ? "red" : "green";
+    const terminalTitle = unclassifiedEffect
+        ? "The selected rollout matches, but attempt two introduces an unclassified structural effect."
+        : failed
+            ? "The fresh migration fails because its row effect doesn't match the selected rollout policy."
+            : "The database probe verifies the selected rollout policy on a fresh migration.";
+    const sideEffect = unclassifiedEffect ? `
+        <article class="policy-alert policy-alert-gap">
+            <div>${statusPill("UNCLASSIFIED", "violet")}<strong>Attempt-two side effect</strong></div>
+            <code>ADDED INDEX public.share_links_expiration_idx</code>
+            <p>The decision match can't hide an effect that no approved policy owns.</p>
+        </article>
+    ` : "";
+    const completionTitle = unclassifiedEffect
+        ? "Decision verification passed, but policy coverage didn't."
+        : failed
+            ? "The existing-link decision doesn't match."
+            : "Every selected decision matches.";
+    const completionDetail = unclassifiedEffect
+        ? "The gate records COVERAGE_GAP and preserves the attempt-two effect for platform review."
+        : failed
+            ? "The gate records FAILED and doesn't return the fresh migration."
+            : "The verified migration can return to the wider development loop.";
     return `
-        ${stageHeading(failed ? "FAILED" : "COMPLETED", failed ? "red" : "green", failed ? "The fresh migration fails because its row effect doesn't match the selected rollout policy." : "The database probe verifies the selected rollout policy on a fresh migration.")}
-        ${verificationResultSwitch()}
+        ${stageHeading(terminalState, terminalTone, terminalTitle)}
+        ${unclassifiedEffect ? "" : verificationResultSwitch()}
         <div class="verification-layout">
             <article class="content-card">
                 <div class="contract-row"><span>Existing-link policy</span><strong>${state.expiration}</strong></div>
@@ -920,7 +1030,8 @@ function databaseVerifyStage() {
                 <div class="verify-row"><span>Probe cleanup</span>${verificationValues("rolled back", "rolled back")}${statusPill("MATCH", "green")}</div>
             </article>
         </div>
-        <div class="completion-banner ${failed ? "completion-banner-failed" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : "✓"}</span><div><strong>${failed ? "The existing-link outcome doesn't match." : "Every expected outcome matches."}</strong><p>${failed ? "The gate records FAILED and doesn't return the fresh migration." : "The verified migration can return to the wider development loop."}</p></div></div>
+        ${sideEffect}
+        <div class="completion-banner ${failed ? "completion-banner-failed" : ""} ${unclassifiedEffect ? "completion-banner-gap" : ""}"><span class="completion-check" aria-hidden="true">${failed ? "×" : unclassifiedEffect ? "!" : "✓"}</span><div><strong>${completionTitle}</strong><p>${completionDetail}</p></div></div>
         ${stageActions({ back: "answer", terminal: true })}
     `;
 }
@@ -928,24 +1039,22 @@ function databaseVerifyStage() {
 function gapStage() {
     const database = state.scenario === "database";
     const event = database ? `{
-  "decision_id": "existing_share_link_expiration",
-  "observed": "UNMODELED",
+  "category": "UNKNOWN_EFFECT",
   "attempt_number": 1,
-  "facts": {
-    "existing_link_expires_at": null,
-    "new_link_expires_at": null
+  "unknown_effect": {
+    "decision_id": "existing_item_sharing_link_rollout",
+    "observed": "existing link expires after 7 days"
   }
 }` : `{
-  "decision_id": "workspace_export_repeat_request",
-  "observed": "UNMODELED",
+  "category": "UNKNOWN_EFFECT",
   "attempt_number": 1,
-  "facts": {
-    "repeat_owner_status": 200,
-    "repeat_owner_jobs_created": 0
+  "unknown_effect": {
+    "decision_id": "workspace_export_repeat_request",
+    "observed": "HTTP 200 and no new job"
   }
 }`;
     return `
-        ${stageHeading("COVERAGE_GAP", "violet", "An unsupported observation stops the product workflow without becoming a product decision.")}
+        ${stageHeading("COVERAGE_GAP", "violet", "An UnknownEffect stops the product workflow without becoming an owner decision.")}
         <div class="gap-layout">
             <article class="content-card event-card">
                 <div class="card-top"><span>run.json</span></div>
@@ -963,6 +1072,52 @@ function gapStage() {
     `;
 }
 
+function robustnessStage() {
+    if (isInvariantViolationReplay()) {
+        return `
+            ${stageHeading("FAILED", "red", "A required member-denial invariant is violated.")}
+            <article class="policy-alert policy-alert-failed policy-alert-terminal">
+                <div>${statusPill("VIOLATED", "red")}<strong>workspace_export_member_denial</strong></div>
+                <dl>
+                    <div><dt>Expected</dt><dd>HTTP 403 and no job</dd></div>
+                    <div><dt>Observed</dt><dd>HTTP 202 and one job</dd></div>
+                    <div><dt>Result</dt><dd>FAILED before evidence review</dd></div>
+                </dl>
+                <p>A requirement already fixed by the brief isn't converted into an owner choice.</p>
+            </article>
+            ${stageActions({ back: "observe", terminal: true })}
+        `;
+    }
+    if (isForbiddenEffectReplay()) {
+        return `
+            ${stageHeading("FAILED", "red", "An observed database effect is explicitly forbidden by policy.")}
+            <article class="policy-alert policy-alert-failed policy-alert-terminal">
+                <div>${statusPill("FORBIDDEN", "red")}<strong>Removed database column</strong></div>
+                <dl>
+                    <div><dt>Effect</dt><dd><code>REMOVED COLUMN public.share_links.owner_id</code></dd></div>
+                    <div><dt>Policy</dt><dd><code>share_link_expiration_effect_policy@1</code></dd></div>
+                    <div><dt>Result</dt><dd>FAILED before evidence review</dd></div>
+                </dl>
+                <p>Matching requested behavior doesn't authorize destructive structural changes.</p>
+            </article>
+            ${stageActions({ back: "observe", terminal: true })}
+        `;
+    }
+    return `
+        ${stageHeading("COVERAGE_GAP", "violet", "A required observer result is missing.")}
+        <article class="policy-alert policy-alert-gap policy-alert-terminal">
+            <div>${statusPill("MISSING", "violet")}<strong>api.member_denial</strong></div>
+            <dl>
+                <div><dt>Required</dt><dd>Yes</dd></div>
+                <div><dt>Attestation</dt><dd>No result returned</dd></div>
+                <div><dt>Result</dt><dd>COVERAGE_GAP before evidence review</dd></div>
+            </dl>
+            <p>Absent observer evidence can't be treated as a passing check.</p>
+        </article>
+        ${stageActions({ back: "observe", terminal: true })}
+    `;
+}
+
 function stageRunRecordItems(stageId) {
     if (stageId === "brief") {
         return [
@@ -971,13 +1126,14 @@ function stageRunRecordItems(stageId) {
         ];
     }
     if (stageId === "observe") {
-        const outcomes = state.scenario === "api"
-            ? `Administrator: <code>OWNER_ONLY</code>; repeated request: <code>${isCoverageGapReplay() ? "UNMODELED" : "REUSE_ACTIVE_EXPORT"}</code>`
-            : `Existing-link policy: <code>${isCoverageGapReplay() ? "UNMODELED" : "PRESERVE_EXISTING"}</code>`;
+        const observations = state.scenario === "api"
+            ? `Administrator: <code>OWNER_ONLY</code>; repeated request: <code>${isCoverageGapReplay() ? "UnknownEffect" : "REUSE_ACTIVE_EXPORT"}</code>`
+            : `Existing-link policy: <code>${isCoverageGapReplay() ? "UnknownEffect" : "PRESERVE_EXISTING"}</code>`;
         return [
             "Stored the attempt-one artifact digest and model provenance",
             "Stored normalized facts and measured effects from the bounded observer",
-            `Recorded typed outcomes: ${outcomes}`,
+            `Recorded typed decision observations: ${observations}`,
+            "Stored invariant results, effect dispositions, and the required coverage manifest",
         ];
     }
     if (stageId === "review") {
@@ -1008,14 +1164,42 @@ function stageRunRecordItems(stageId) {
         ];
     }
     if (stageId === "verify") {
+        if (isAttemptTwoUnclassifiedReplay()) {
+            return [
+                "Stored the attempt-two artifact digest and complete second observation",
+                "Stored the matching selected decision and the unclassified index effect",
+                "Recorded an UNCLASSIFIED_EFFECT gap and set the run state to <code>COVERAGE_GAP</code>",
+            ];
+        }
         return isVerificationFailureReplay() ? [
             "Stored the attempt-two artifact digest and second observation",
-            "Stored the expected and observed outcome mismatch",
+            "Stored the selected and observed decision mismatch",
             "Recorded a failure message and set the run state to <code>FAILED</code>",
         ] : [
             "Stored the attempt-two artifact digest and second observation",
-            "Stored the exact expected and observed outcome comparison",
+            "Stored the exact selected and observed decision comparison",
             "Stored the verified decision set and set the run state to <code>COMPLETED</code>",
+        ];
+    }
+    if (stageId === "robust") {
+        if (isInvariantViolationReplay()) {
+            return [
+                "Stored the violated member-denial invariant and its evidence",
+                "Recorded an <code>INVARIANT_VIOLATION</code> failure",
+                "Set the run state to <code>FAILED</code> without creating an owner request",
+            ];
+        }
+        if (isForbiddenEffectReplay()) {
+            return [
+                "Stored the removed-column effect and its <code>FORBIDDEN</code> disposition",
+                "Recorded a <code>FORBIDDEN_EFFECT</code> failure",
+                "Set the run state to <code>FAILED</code> without creating an owner request",
+            ];
+        }
+        return [
+            "Stored an explicit <code>MISSING</code> result for required member-denial coverage",
+            "Recorded a <code>MISSING_COVERAGE</code> gap",
+            "Set the run state to <code>COVERAGE_GAP</code> without creating an owner request",
         ];
     }
     return [
@@ -1038,6 +1222,52 @@ function stageRunRecordDetails(stageId) {
     `;
 }
 
+function policyAssessmentDetails(stageId) {
+    if (!["observe", "verify", "gap", "robust"].includes(stageId)) return "";
+
+    let invariants;
+    let effects;
+    let coverage;
+    let decisions;
+
+    if (state.scenario === "api") {
+        invariants = isInvariantViolationReplay()
+            ? "1 passed, 1 violated"
+            : "2 passed";
+        effects = "No structural effects";
+        coverage = isMissingCoverageReplay()
+            ? "3 passed, 1 missing"
+            : "4 required rules passed";
+        decisions = isCoverageGapReplay()
+            ? "1 observation, 1 UnknownEffect"
+            : "2 typed observations";
+    } else {
+        invariants = "3 passed";
+        effects = isForbiddenEffectReplay()
+            ? "1 expected, 1 forbidden"
+            : isAttemptTwoUnclassifiedReplay() && stageId === "verify"
+                ? "1 expected, 1 unclassified"
+                : "1 expected";
+        coverage = "7 required rules passed";
+        decisions = isCoverageGapReplay()
+            ? "1 UnknownEffect"
+            : "1 typed observation";
+    }
+
+    return `
+        <details class="stage-policy-details">
+            <summary>Policy assessment</summary>
+            <div class="policy-assessment-grid">
+                <article><span>Invariants</span><strong>${invariants}</strong></article>
+                <article><span>Effect dispositions</span><strong>${effects}</strong></article>
+                <article><span>Coverage manifest</span><strong>${coverage}</strong></article>
+                <article><span>Decision observations</span><strong>${decisions}</strong></article>
+            </div>
+            <p>Policy snapshot <code>${state.scenario === "api" ? "demo-api-policy-v2" : "demo-postgres-policy-v2"}</code> is pinned to the run.</p>
+        </details>
+    `;
+}
+
 function renderStage() {
     const apiStages = {
         brief: apiBriefStage,
@@ -1054,13 +1284,20 @@ function renderStage() {
         answer: databaseAnswerStage,
         verify: databaseVerifyStage,
         gap: gapStage,
+        robust: robustnessStage,
     };
+    apiStages.robust = robustnessStage;
     const stages = state.scenario === "database" ? databaseStages : apiStages;
     const validSteps = currentReplayRoute().steps.map((step) => step.id);
     if (!validSteps.includes(state.step)) state.step = "brief";
     stageContent.innerHTML = stages[state.step]();
     const actions = stageContent.querySelector(".stage-actions");
-    if (actions) actions.insertAdjacentHTML("beforebegin", stageRunRecordDetails(state.step));
+    if (actions) {
+        actions.insertAdjacentHTML(
+            "beforebegin",
+            `${policyAssessmentDetails(state.step)}${stageRunRecordDetails(state.step)}`,
+        );
+    }
     renderRail();
     renderReplayPath();
     renderReplayRouteControls();
@@ -1122,7 +1359,7 @@ function observationMethodDetails() {
                 output: "status + jobs_created",
             },
             {
-                title: "Typed outcomes",
+                title: "Typed decision observations",
                 description: "Normalize the measured behavior into two independent decisions.",
                 output: "OWNER_ONLY + REUSE_ACTIVE_EXPORT",
                 result: true,
@@ -1135,7 +1372,7 @@ function observationMethodDetails() {
                     <p>The observer executes the generated handler in a bounded container and records effects instead of trusting the agent's explanation.</p>
                 </div>
                 ${flow}
-                ${observerSummary("One observer produces two product outcomes.", "Every scenario returns the same normalized ObservationResult shape to the gate.")}
+                ${observerSummary("One observer produces two typed decision observations.", "Every scenario returns the same normalized ObservationResult shape to the gate.")}
             </section>
         `;
     }
@@ -1152,7 +1389,7 @@ function observationMethodDetails() {
             output: "transactional probe",
         },
         {
-            title: "Typed outcome",
+            title: "Typed decision observation",
             description: "Normalize the measured rollout behavior for existing links.",
             output: "PRESERVE_EXISTING",
             result: true,
@@ -1188,24 +1425,24 @@ function vocabularyCard(title, values, detail, gap = false) {
     `;
 }
 
-function outcomeBoundaryDetails() {
+function decisionBoundaryDetails() {
     const cards = state.scenario === "api"
         ? [
-            vocabularyCard("Required baseline effects", ["owner: 202 / +1", "member: 403 / +0"], "Both baseline calls must match before either product outcome is covered."),
+            vocabularyCard("Required invariants", ["owner: 202 / +1", "member: 403 / +0"], "Both required behaviors must pass before owner decisions are reviewed."),
             vocabularyCard("Administrator access", ["OWNER_ONLY", "OWNER_AND_ADMIN"], "The administrator call must match one supported status and job-count combination."),
             vocabularyCard("Repeated owner request", ["REUSE_ACTIVE_EXPORT", "CREATE_ANOTHER_EXPORT"], "The second owner call must return 202 and create zero or one additional job."),
-            vocabularyCard("Outside the boundary", ["UNMODELED"], "Any other measured status or job-count combination stops the product workflow.", true),
+            vocabularyCard("Outside the boundary", ["UnknownEffect"], "Any other measured status or job-count combination stops the product workflow.", true),
         ]
         : [
             vocabularyCard("Existing-link rollout", ["PRESERVE_EXISTING", "EXPIRE_EXISTING"], "The seeded row must remain NULL or receive an expiration approximately 30 days from migration."),
-            vocabularyCard("Required migration effects", ["timestamptz", "nullable", "default present", "new row +30 days"], "Every schema and inserted-row effect must match before a rollout outcome is covered."),
-            vocabularyCard("Outside the boundary", ["UNMODELED"], "An unsupported row effect stops the product workflow before evidence review.", true),
+            vocabularyCard("Required invariants", ["timestamptz", "nullable", "default present", "new row +30 days", "rollback"], "Every required invariant must pass before the rollout decision is reviewed."),
+            vocabularyCard("Outside the boundary", ["UnknownEffect"], "An unsupported existing-row effect stops the product workflow before evidence review.", true),
         ];
     return `
-        <section class="workflow-observation" aria-label="Supported outcome boundary">
+        <section class="workflow-observation" aria-label="Decision and invariant boundary">
             <div class="workflow-observation-header">
-                <h3>Supported outcome vocabulary</h3>
-                <p>The gate accepts only declared outcome identifiers produced from measured effects.</p>
+                <h3>Typed observation boundary</h3>
+                <p>The gate separates brief-defined invariants, owner decisions, and effects that aren't covered by either.</p>
             </div>
             <div class="observer-vocabulary">${cards.join("")}</div>
         </section>
@@ -1216,11 +1453,11 @@ function coverageGapDetails() {
     const detail = state.scenario === "api"
         ? {
             observed: "Repeated owner: HTTP 200 / +0 jobs",
-            reason: "Neither repeat option permits HTTP 200, so the observer reports UNMODELED.",
+            reason: "Neither repeat option permits HTTP 200, so the observer records an UnknownEffect.",
         }
         : {
-            observed: "New link: expires_at = NULL",
-            reason: "The required 30-day expiration isn't present, so no supported rollout outcome is valid.",
+            observed: "Existing link: expires_at = +7 days",
+            reason: "Neither rollout option permits a 7-day expiration, so the observer records an UnknownEffect.",
         };
     return `
         <section class="workflow-observation workflow-observation-gap" aria-label="Coverage gap evidence">
@@ -1242,17 +1479,17 @@ function verificationObservationDetails() {
         ? {
             input: "Complete administrator + repeat decisions",
             probe: "Four bounded handler calls",
-            result: "Both typed outcomes must match",
+            result: "Both typed decisions must match",
         }
         : {
             input: "Selected existing-link rollout",
             probe: "Seed, migrate, insert, inspect, roll back",
-            result: "Rollout outcome and new-link expiration must match",
+            result: "Policy and rollout decision must match",
         };
     const flow = observerFlow([
         { title: "Expected decisions", description: "Load the complete owner-approved decision set.", output: comparison.input },
         { title: "Run the same observer", description: "Measure the fresh artifact with the original bounded probe.", output: comparison.probe },
-        { title: "Exact comparison", description: "Complete only when every fresh outcome equals its expected value.", output: comparison.result, result: true },
+        { title: "Exact comparison", description: "Complete only when policy passes and every fresh decision equals its selected value.", output: comparison.result, result: true },
     ]);
     return `
         <section class="workflow-observation" aria-label="Verification observation">
@@ -1261,7 +1498,7 @@ function verificationObservationDetails() {
                 <p>The second attempt is verified through measured effects using the same coverage boundary as attempt one.</p>
             </div>
             ${flow}
-            ${observerSummary("Verification requires an exact match.", "A missing, extra, mismatched, or UNMODELED second-attempt outcome ends in FAILED.")}
+            ${observerSummary("Verification repeats the complete policy pipeline.", "Decision mismatches fail. Unknown, unclassified, or missing evidence routes to COVERAGE_GAP.")}
         </section>
     `;
 }
@@ -1269,7 +1506,7 @@ function verificationObservationDetails() {
 function workflowObservationDetails(nodeId) {
     const renderers = {
         observe1: observationMethodDetails,
-        outcomes: outcomeBoundaryDetails,
+        policy: decisionBoundaryDetails,
         coverage_gap: coverageGapDetails,
         verify: verificationObservationDetails,
     };
@@ -1290,9 +1527,35 @@ function setReplayRoute(routeId) {
     renderStage();
 }
 
+function setRobustnessRoute(routeId) {
+    const routeScenarios = {
+        invariant_violation: "api",
+        forbidden_effect: "database",
+        missing_coverage: "api",
+        attempt2_unclassified: "database",
+    };
+    const scenario = routeScenarios[routeId];
+    if (!scenario || !replayRoutes[routeId]) return;
+
+    state.replayRoute = routeId;
+    state.scenario = scenario;
+    resetWalkthrough();
+    scenarioName.textContent = scenario === "database"
+        ? "Share-link expiration"
+        : "Workspace export authorization";
+    walkthroughScenarioTabs.querySelectorAll("[data-scenario]").forEach((tab) => {
+        tab.setAttribute("aria-selected", String(tab.dataset.scenario === scenario));
+    });
+    renderWorkflow();
+    renderStage();
+}
+
 function setScenario(scenario) {
     if (!["api", "database"].includes(scenario) || scenario === state.scenario) return;
     state.scenario = scenario;
+    if (!["owner", "supported", "gap", "verification_failure"].includes(state.replayRoute)) {
+        state.replayRoute = "owner";
+    }
     resetWalkthrough();
     scenarioName.textContent = scenario === "database"
         ? "Share-link expiration"
@@ -1387,6 +1650,12 @@ replayRouteTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-replay-route]");
     if (!button) return;
     setReplayRoute(button.dataset.replayRoute);
+});
+
+robustnessRouteTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-robustness-route]");
+    if (!button) return;
+    setRobustnessRoute(button.dataset.robustnessRoute);
 });
 
 renderView();

@@ -13,17 +13,42 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from implicit_decision_gate.policy import coverage_evidence_digest
 from implicit_decision_gate.postgres_surface import (
+    DATA_INTEGRITY,
+    INDEXING,
+    SCHEMA_SHAPE,
     CatalogSnapshot,
     capture_catalog,
     diff_catalogs,
 )
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
+from implicit_decision_gate.scenario import (
+    CoverageResult,
+    CoverageStatus,
+    DecisionObservation,
+    FactValue,
+    InvariantResult,
+    InvariantStatus,
+    ObservationResult,
+    UnknownEffect,
+)
 
 EXPECTED_DATA_TYPE = "timestamp with time zone"
 EXISTING_LINK_ROLLOUT = "existing_item_sharing_link_rollout"
 PRESERVE_EXISTING = "PRESERVE_EXISTING"
 EXPIRE_EXISTING = "EXPIRE_EXISTING"
+COLUMN_SHAPE_INVARIANT = "share_link_expiration_column_shape"
+NEW_LINK_EXPIRATION_INVARIANT = "share_link_new_link_expiration"
+ROLLBACK_INVARIANT = "share_link_probe_rollback"
+POSTGRES_COLUMN_COVERAGE = "postgres.expiration_column_shape"
+POSTGRES_NEW_LINK_COVERAGE = "postgres.new_link_expiration"
+POSTGRES_EXISTING_LINK_COVERAGE = "postgres.existing_link_rollout"
+POSTGRES_SCHEMA_COVERAGE = "postgres.schema_shape"
+POSTGRES_INTEGRITY_COVERAGE = "postgres.data_integrity"
+POSTGRES_INDEXING_COVERAGE = "postgres.indexing"
+POSTGRES_ROLLBACK_COVERAGE = "postgres.rollback"
+POSTGRES_OBSERVER_ID = "postgres_migration_probe"
+POSTGRES_OBSERVER_VERSION = "1"
 COMPOSE_ADMIN_DSN = "postgresql://idg_admin:idg_admin@127.0.0.1:55432/postgres"
 APPROXIMATION_TOLERANCE = timedelta(seconds=10)
 TRANSACTION_CONTROL = re.compile(
@@ -61,7 +86,7 @@ def _approximately_thirty_days_after(
 
 
 def normalize_observation(observation: Observation) -> ObservationResult:
-    """Map raw database facts to one of the two modeled behaviors."""
+    """Separate required migration behavior from the rollout decision."""
 
     existing_label = "missing"
     if observation.existing_row_found:
@@ -87,28 +112,88 @@ def normalize_observation(observation: Observation) -> ObservationResult:
         else:
             inserted_label = "other"
 
-    structure_matches = (
+    column_shape_matches = (
         observation.data_type == EXPECTED_DATA_TYPE
         and observation.nullable is True
         and observation.column_default is not None
-        and inserted_label == "approximately_now_plus_30_days"
     )
-    option = UNMODELED_OUTCOME
-    if structure_matches and existing_label == "null":
-        option = PRESERVE_EXISTING
-    elif structure_matches and existing_label == "approximately_migration_time_plus_30_days":
-        option = EXPIRE_EXISTING
+    new_link_matches = inserted_label == "approximately_now_plus_30_days"
+    facts: dict[str, FactValue] = {
+        "data_type": observation.data_type,
+        "nullable": observation.nullable,
+        "column_default": observation.column_default,
+        "insert_without_value": inserted_label,
+        "existing_row": existing_label,
+        "rollback_verified": False,
+    }
+    column_evidence = {
+        "data_type": observation.data_type,
+        "nullable": observation.nullable,
+        "column_default": observation.column_default,
+    }
+    new_link_evidence = {"insert_without_value": inserted_label}
+    existing_evidence = {"existing_row": existing_label}
+    decisions: list[DecisionObservation] = []
+    unknown_effects: list[UnknownEffect] = []
+    if existing_label == "null":
+        decisions.append(
+            DecisionObservation(
+                decision_id=EXISTING_LINK_ROLLOUT,
+                option_id=PRESERVE_EXISTING,
+                evidence=existing_evidence,
+            )
+        )
+    elif existing_label == "approximately_migration_time_plus_30_days":
+        decisions.append(
+            DecisionObservation(
+                decision_id=EXISTING_LINK_ROLLOUT,
+                option_id=EXPIRE_EXISTING,
+                evidence=existing_evidence,
+            )
+        )
+    else:
+        unknown_effects.append(
+            UnknownEffect(
+                surface_id="postgres_share_links",
+                rule_id=POSTGRES_EXISTING_LINK_COVERAGE,
+                decision_id=EXISTING_LINK_ROLLOUT,
+                description="Existing-link behavior is outside the approved rollout vocabulary.",
+                evidence=existing_evidence,
+            )
+        )
 
     return ObservationResult(
-        outcomes={EXISTING_LINK_ROLLOUT: option},
-        facts={
-            "data_type": observation.data_type,
-            "nullable": observation.nullable,
-            "column_default": observation.column_default,
-            "insert_without_value": inserted_label,
-            "existing_row": existing_label,
-            "rollback_verified": False,
-        },
+        invariants=[
+            InvariantResult(
+                invariant_id=COLUMN_SHAPE_INVARIANT,
+                expected=(
+                    "expires_at is a nullable timestamp with time zone with a default for new rows."
+                ),
+                observed=(
+                    f"type={observation.data_type}, nullable={observation.nullable}, "
+                    f"default={observation.column_default}"
+                ),
+                status=(
+                    InvariantStatus.PASSED if column_shape_matches else InvariantStatus.VIOLATED
+                ),
+                evidence=column_evidence,
+            ),
+            InvariantResult(
+                invariant_id=NEW_LINK_EXPIRATION_INVARIANT,
+                expected="A new link expires approximately 30 days after creation.",
+                observed=inserted_label,
+                status=(InvariantStatus.PASSED if new_link_matches else InvariantStatus.VIOLATED),
+                evidence=new_link_evidence,
+            ),
+        ],
+        decisions=decisions,
+        unknown_effects=unknown_effects,
+        facts=facts,
+        coverage=[
+            _coverage_result(POSTGRES_COLUMN_COVERAGE, column_evidence),
+            _coverage_result(POSTGRES_NEW_LINK_COVERAGE, new_link_evidence),
+            _coverage_result(POSTGRES_EXISTING_LINK_COVERAGE, existing_evidence),
+        ],
     )
 
 
@@ -203,12 +288,42 @@ class PostgresProbe:
                     observation = self._observe(connection, migration_time)
                     result = normalize_observation(observation)
                     result.effects = diff_catalogs(baseline_snapshot, migrated_snapshot)
+                    for rule_id, structural_rule in (
+                        (POSTGRES_SCHEMA_COVERAGE, SCHEMA_SHAPE),
+                        (POSTGRES_INTEGRITY_COVERAGE, DATA_INTEGRITY),
+                        (POSTGRES_INDEXING_COVERAGE, INDEXING),
+                    ):
+                        result.coverage.append(
+                            _coverage_result(
+                                rule_id,
+                                {
+                                    "effects": "\n".join(
+                                        effect.model_dump_json()
+                                        for effect in result.effects
+                                        if effect.rule_id == structural_rule
+                                    )
+                                },
+                            )
+                        )
                 finally:
                     connection.execute("ROLLBACK")
                 rollback_verified = self._rollback_verified(connection, baseline_snapshot)
                 result.facts["rollback_verified"] = rollback_verified
                 if not rollback_verified:
                     raise ProbeError("Migration transaction rollback could not be verified")
+                rollback_evidence = {"rollback_verified": rollback_verified}
+                result.invariants.append(
+                    InvariantResult(
+                        invariant_id=ROLLBACK_INVARIANT,
+                        expected="The disposable migration transaction is fully rolled back.",
+                        observed=f"rollback_verified={rollback_verified}",
+                        status=InvariantStatus.PASSED,
+                        evidence=rollback_evidence,
+                    )
+                )
+                result.coverage.append(
+                    _coverage_result(POSTGRES_ROLLBACK_COVERAGE, rollback_evidence)
+                )
                 return result
         except ProbeError:
             raise
@@ -281,3 +396,11 @@ class PostgresProbe:
         baseline_snapshot: CatalogSnapshot,
     ) -> bool:
         return capture_catalog(connection) == baseline_snapshot
+
+
+def _coverage_result(rule_id: str, evidence: dict[str, Any]) -> CoverageResult:
+    return CoverageResult(
+        rule_id=rule_id,
+        status=CoverageStatus.PASSED,
+        evidence_digest=coverage_evidence_digest(evidence),
+    )

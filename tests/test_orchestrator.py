@@ -6,20 +6,26 @@ import json
 import stat
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from implicit_decision_gate.api_probe import (
     ADMINISTRATOR_ACCESS,
+    API_ADMINISTRATOR_COVERAGE,
+    API_REPEAT_COVERAGE,
     CREATE_ANOTHER_EXPORT,
+    MEMBER_DENIAL_INVARIANT,
     OWNER_AND_ADMIN,
     OWNER_ONLY,
     REPEAT_REQUEST,
     REUSE_ACTIVE_EXPORT,
 )
 from implicit_decision_gate.gate import (
+    CoverageGapCategory,
     EvidenceClassification,
+    FailureCategory,
     GateError,
     ModelRole,
     ReviewerResult,
@@ -31,14 +37,25 @@ from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import (
     EXISTING_LINK_ROLLOUT,
     EXPIRE_EXISTING,
+    POSTGRES_EXISTING_LINK_COVERAGE,
+    POSTGRES_INDEXING_COVERAGE,
     PRESERVE_EXISTING,
 )
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME, ObservationResult
+from implicit_decision_gate.scenario import (
+    CoverageStatus,
+    DecisionObservation,
+    InvariantStatus,
+    ObservationResult,
+    ObservedEffect,
+    UnknownEffect,
+)
 from implicit_decision_gate.scenarios import (
     WORKSPACE_EXPORT_AUTHORIZATION,
     scenario_registry,
 )
 from tests.conftest import (
+    AUTH_HANDLER,
+    SCHEMA,
     ScriptedCodingClient,
     ScriptedReviewerClient,
     ScriptMarkerProbe,
@@ -68,6 +85,8 @@ except GateError as error:
 raise SystemExit(0 if run.state is RunState.COMPLETED else 3)
 """
 
+UNKNOWN_OPTION = "UNKNOWN_EFFECT"
+
 
 def not_evidenced() -> ReviewerResult:
     """Return the expected result for the intentionally incomplete brief."""
@@ -78,15 +97,50 @@ def not_evidenced() -> ReviewerResult:
     )
 
 
-class FixedOutcomeProbe:
-    """Return one exact outcome mapping for boundary tests."""
+class FixedDecisionProbe:
+    """Return one exact decision mapping for boundary tests."""
 
-    def __init__(self, outcomes: dict[str, str]) -> None:
-        self.outcomes = outcomes
+    def __init__(self, decisions: dict[str, str]) -> None:
+        self.decisions = decisions
+
+    def observe(self, artifact: str, context: str) -> ObservationResult:
+        del artifact
+        result = ScriptMarkerProbe().observe(
+            f"# {OWNER_ONLY} {CREATE_ANOTHER_EXPORT}",
+            context,
+        )
+        result.decisions = []
+        result.unknown_effects = []
+        for decision_id, option_id in self.decisions.items():
+            if option_id == UNKNOWN_OPTION:
+                result.unknown_effects.append(
+                    UnknownEffect(
+                        surface_id="workspace_export_api",
+                        rule_id=(
+                            API_ADMINISTRATOR_COVERAGE
+                            if decision_id == ADMINISTRATOR_ACCESS
+                            else API_REPEAT_COVERAGE
+                        ),
+                        decision_id=decision_id,
+                        description="Fixed unknown decision behavior.",
+                    )
+                )
+            else:
+                result.decisions.append(
+                    DecisionObservation(decision_id=decision_id, option_id=option_id)
+                )
+        return result
+
+
+class FixedObservationProbe:
+    """Return an exact typed observation for gate-policy tests."""
+
+    def __init__(self, observation: ObservationResult) -> None:
+        self.observation = observation
 
     def observe(self, artifact: str, context: str) -> ObservationResult:
         del artifact, context
-        return ObservationResult(outcomes=self.outcomes)
+        return self.observation.model_copy(deep=True)
 
 
 def orchestrator(
@@ -164,6 +218,25 @@ def test_awaiting_owner_is_durable_and_blocks_more_model_work(
     persisted = RunStore(reference_repo).load(run.run_id)
     assert persisted.state is RunState.AWAITING_OWNER
     assert len(persisted.attempts) == 1
+
+
+def test_durable_run_rejects_silent_policy_drift(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    controller = orchestrator(
+        reference_repo,
+        tmp_path / "worktrees",
+        ScriptedCodingClient(["-- EXPIRE_EXISTING"]),
+        ScriptedReviewerClient([not_evidenced()]),
+        ScriptMarkerProbe(),
+    )
+    run = controller.start()
+    scenario = controller.scenarios[run.scenario_id]
+    controller.scenarios[run.scenario_id] = replace(scenario, policy_version="changed")
+
+    with pytest.raises(GateError, match="current scenario policy differs"):
+        controller.show(run.run_id)
 
 
 def test_start_reads_the_brief_from_the_pinned_commit(
@@ -422,13 +495,17 @@ def test_retry_verifies_supported_outcome_while_honoring_owner_answer(
 
 
 @pytest.mark.parametrize(
-    ("second_sql", "expected_coverage_gaps"),
-    [("-- EXPIRE_EXISTING", 0), ("-- OTHER", 1)],
+    ("second_sql", "expected_state", "expected_coverage_gaps"),
+    [
+        ("-- EXPIRE_EXISTING", RunState.FAILED, 0),
+        ("-- OTHER", RunState.COVERAGE_GAP, 1),
+    ],
 )
-def test_second_attempt_mismatch_or_unmodeled_fails(
+def test_second_attempt_mismatch_or_unknown_effect_stops(
     reference_repo: Path,
     tmp_path: Path,
     second_sql: str,
+    expected_state: RunState,
     expected_coverage_gaps: int,
 ) -> None:
     first = orchestrator(
@@ -456,7 +533,7 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
         ScriptMarkerProbe(),
     ).resume(first.run_id)
 
-    assert failed.state is RunState.FAILED
+    assert failed.state is expected_state
     assert len(failed.attempts) == 2
     assert len(failed.coverage_gaps) == expected_coverage_gaps
     assert len(second_client.prompts) == 1
@@ -469,6 +546,132 @@ def test_second_attempt_mismatch_or_unmodeled_fails(
             EXISTING_LINK_ROLLOUT,
             EXPIRE_EXISTING,
         )
+
+
+def test_explicit_requirement_violation_fails_before_review(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    observation = ScriptMarkerProbe().observe(
+        f"# {OWNER_ONLY} {CREATE_ANOTHER_EXPORT}",
+        AUTH_HANDLER,
+    )
+    member = next(
+        invariant
+        for invariant in observation.invariants
+        if invariant.invariant_id == MEMBER_DENIAL_INVARIANT
+    )
+    member.status = InvariantStatus.VIOLATED
+    member.observed = "Returned 202 and created one export job."
+    reviewer = ScriptedReviewerClient([])
+    probe = FixedObservationProbe(observation)
+    run = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(probe, probe),
+        coding_client=ScriptedCodingClient(["generated handler"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    ).start(WORKSPACE_EXPORT_AUTHORIZATION)
+
+    assert run.state is RunState.FAILED
+    assert run.failure is not None
+    assert run.failure.category is FailureCategory.INVARIANT_VIOLATION
+    assert MEMBER_DENIAL_INVARIANT in run.failure.message
+    assert reviewer.prompts == []
+    assert run.coverage_gaps == []
+
+
+def test_forbidden_structural_effect_fails_before_review(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    observation = ScriptMarkerProbe().observe("-- EXPIRE_EXISTING", SCHEMA)
+    observation.effects.append(
+        ObservedEffect(
+            rule_id="data_integrity",
+            change="REMOVED",
+            object_kind="constraint",
+            identity="public.share_links.share_links_token_key",
+            attribute="definition",
+            before="UNIQUE (token)",
+        )
+    )
+    reviewer = ScriptedReviewerClient([])
+    probe = FixedObservationProbe(observation)
+    run = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(probe, probe),
+        coding_client=ScriptedCodingClient(["generated migration"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    ).start()
+
+    assert run.state is RunState.FAILED
+    assert run.failure is not None
+    assert run.failure.category is FailureCategory.FORBIDDEN_EFFECT
+    assert run.attempts[0].effect_dispositions[0].status.value == "FORBIDDEN"
+    assert reviewer.prompts == []
+
+
+def test_unclassified_structural_effect_creates_coverage_gap(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    observation = ScriptMarkerProbe().observe("-- EXPIRE_EXISTING", SCHEMA)
+    observation.effects.append(
+        ObservedEffect(
+            rule_id="indexing",
+            change="ADDED",
+            object_kind="index",
+            identity="public.share_links.unrelated_idx",
+            attribute="definition",
+            after="CREATE INDEX unrelated_idx ON public.share_links (created_at)",
+        )
+    )
+    reviewer = ScriptedReviewerClient([])
+    probe = FixedObservationProbe(observation)
+    run = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(probe, probe),
+        coding_client=ScriptedCodingClient(["generated migration"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    ).start()
+
+    assert run.state is RunState.COVERAGE_GAP
+    assert [gap.category for gap in run.coverage_gaps] == [CoverageGapCategory.UNCLASSIFIED_EFFECT]
+    assert run.coverage_gaps[0].effect_id == run.attempts[0].effect_dispositions[0].effect_id
+    assert reviewer.prompts == []
+
+
+def test_missing_required_observer_result_creates_coverage_gap(
+    reference_repo: Path,
+    tmp_path: Path,
+) -> None:
+    observation = ScriptMarkerProbe().observe("-- EXPIRE_EXISTING", SCHEMA)
+    observation.coverage = [
+        result for result in observation.coverage if result.rule_id != POSTGRES_INDEXING_COVERAGE
+    ]
+    reviewer = ScriptedReviewerClient([])
+    probe = FixedObservationProbe(observation)
+    run = Orchestrator(
+        repo_path=reference_repo,
+        scenarios=scenario_registry(probe, probe),
+        coding_client=ScriptedCodingClient(["generated migration"]),
+        reviewer_client=reviewer,
+        worktree_root=tmp_path / "worktrees",
+    ).start()
+
+    assert run.state is RunState.COVERAGE_GAP
+    assert run.attempts[0].coverage_manifest is not None
+    indexing_result = next(
+        result
+        for result in run.attempts[0].coverage_manifest.results
+        if result.rule_id == POSTGRES_INDEXING_COVERAGE
+    )
+    assert indexing_result.status is CoverageStatus.MISSING
+    assert [gap.category for gap in run.coverage_gaps] == [CoverageGapCategory.MISSING_COVERAGE]
+    assert reviewer.prompts == []
 
 
 def test_unmodeled_first_attempt_records_coverage_gap_without_review(
@@ -491,8 +694,9 @@ def test_unmodeled_first_attempt_records_coverage_gap_without_review(
     assert reviewer.prompts == []
     assert run.decisions == []
     assert len(run.coverage_gaps) == 1
+    assert run.coverage_gaps[0].category is CoverageGapCategory.UNKNOWN_EFFECT
     assert run.coverage_gaps[0].decision_id == EXISTING_LINK_ROLLOUT
-    assert run.coverage_gaps[0].observed == "UNMODELED"
+    assert run.coverage_gaps[0].rule_id == POSTGRES_EXISTING_LINK_COVERAGE
     assert run.coverage_gaps[0].attempt_number == 1
 
     summary = json.loads(controller.show(run.run_id))
@@ -502,9 +706,12 @@ def test_unmodeled_first_attempt_records_coverage_gap_without_review(
             "run_id": run.run_id,
             "scenario": "share-link-expiration",
             "base_commit": run.base_commit,
+            "category": "UNKNOWN_EFFECT",
+            "surface_id": "postgres_share_links",
+            "rule_id": POSTGRES_EXISTING_LINK_COVERAGE,
+            "description": ("Existing-link behavior is outside the approved rollout vocabulary."),
             "decision_id": EXISTING_LINK_ROLLOUT,
-            "question": "What should happen to existing item-sharing links?",
-            "observed": "UNMODELED",
+            "effect_id": None,
             "attempt_number": 1,
             "facts": {
                 "data_type": "timestamp with time zone",
@@ -529,10 +736,10 @@ def test_one_unmodeled_outcome_routes_the_whole_attempt_to_platform_coverage(
     tmp_path: Path,
 ) -> None:
     reviewer = ScriptedReviewerClient([])
-    observer = FixedOutcomeProbe(
+    observer = FixedDecisionProbe(
         {
             ADMINISTRATOR_ACCESS: OWNER_ONLY,
-            REPEAT_REQUEST: UNMODELED_OUTCOME,
+            REPEAT_REQUEST: UNKNOWN_OPTION,
         }
     )
     controller = Orchestrator(
@@ -556,7 +763,7 @@ def test_undeclared_outcome_string_remains_an_observer_contract_failure(
     tmp_path: Path,
 ) -> None:
     reviewer = ScriptedReviewerClient([])
-    observer = FixedOutcomeProbe(
+    observer = FixedDecisionProbe(
         {
             ADMINISTRATOR_ACCESS: OWNER_ONLY,
             REPEAT_REQUEST: "OTHER",
@@ -573,13 +780,15 @@ def test_undeclared_outcome_string_remains_an_observer_contract_failure(
     run = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
 
     assert run.state is RunState.FAILED
-    assert run.error == (f"Attempt one returned an undeclared outcome for {REPEAT_REQUEST}: OTHER")
+    assert run.error == (
+        f"GateError: Observer returned an undeclared option for {REPEAT_REQUEST}: OTHER"
+    )
     assert run.coverage_gaps == []
     assert reviewer.prompts == []
 
 
 @pytest.mark.parametrize(
-    "outcomes",
+    "decisions",
     [
         {ADMINISTRATOR_ACCESS: OWNER_ONLY},
         {
@@ -589,13 +798,13 @@ def test_undeclared_outcome_string_remains_an_observer_contract_failure(
         },
     ],
 )
-def test_first_attempt_requires_exact_declared_outcomes_before_review(
+def test_first_attempt_requires_exact_declared_decisions_before_review(
     reference_repo: Path,
     tmp_path: Path,
-    outcomes: dict[str, str],
+    decisions: dict[str, str],
 ) -> None:
     reviewer = ScriptedReviewerClient([])
-    observer = FixedOutcomeProbe(outcomes)
+    observer = FixedDecisionProbe(decisions)
     controller = Orchestrator(
         repo_path=reference_repo,
         scenarios=scenario_registry(observer, observer),
@@ -607,7 +816,7 @@ def test_first_attempt_requires_exact_declared_outcomes_before_review(
     result = controller.start(WORKSPACE_EXPORT_AUTHORIZATION)
 
     assert result.state is RunState.FAILED
-    assert result.error == "Attempt one did not return exactly the declared decision outcomes"
+    assert result.error == "GateError: Observer did not account for exactly the declared decisions"
     assert reviewer.prompts == []
     assert result.decisions == []
 

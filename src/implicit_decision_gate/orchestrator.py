@@ -14,9 +14,12 @@ from implicit_decision_gate.agent import (
 )
 from implicit_decision_gate.gate import (
     AttemptRecord,
+    CoverageGapCategory,
     CoverageGapRecord,
     DecisionRecord,
     EvidenceClassification,
+    FailureCategory,
+    FailureRecord,
     GateError,
     ModelRole,
     RunRecord,
@@ -28,12 +31,22 @@ from implicit_decision_gate.gate import (
     utc_now,
     validate_reviewer_result,
 )
+from implicit_decision_gate.policy import (
+    PolicyError,
+    build_coverage_manifest,
+    classify_effects,
+)
 from implicit_decision_gate.scenario import (
-    UNMODELED_OUTCOME,
+    CoverageStatus,
     DecisionOption,
     DecisionSpec,
+    EffectDispositionStatus,
+    InvariantStatus,
+    ObservationResult,
     Scenario,
     option_by_id,
+    scenario_policy_digest,
+    scenario_policy_snapshot,
 )
 from implicit_decision_gate.scenarios import SHARE_LINK_EXPIRATION
 from implicit_decision_gate.worktree import WorktreeManager
@@ -65,9 +78,12 @@ class Orchestrator:
         scenario = self._scenario(scenario_id)
         base_commit = self.worktrees.current_commit()
         brief = self.worktrees.read_file_at_commit(base_commit, scenario.brief_path)
+        policy_snapshot = scenario_policy_snapshot(scenario)
         run = RunRecord(
             run_id=uuid.uuid4().hex,
             scenario_id=scenario.id,
+            policy_snapshot=policy_snapshot,
+            policy_digest=scenario_policy_digest(policy_snapshot),
             state=RunState.STARTED,
             original_brief=brief,
             base_commit=base_commit,
@@ -84,7 +100,7 @@ class Orchestrator:
                 run,
                 decision_id,
                 option,
-                self._scenario(run.scenario_id).decisions,
+                self._scenario_for_run(run).decisions,
             )
             self.store.save(run)
             return run
@@ -102,7 +118,7 @@ class Orchestrator:
         """Render the persisted run summary without model execution."""
 
         run = self.store.load(run_id)
-        return render_show(run, self._scenario(run.scenario_id).decisions)
+        return render_show(run, self._scenario_for_run(run).decisions)
 
     def _execute_or_fail(self, run: RunRecord, *, attempt_number: int) -> RunRecord:
         try:
@@ -110,6 +126,16 @@ class Orchestrator:
         except Exception as error:
             run.state = RunState.FAILED
             run.error = f"{type(error).__name__}: {error}"
+            run.failure = FailureRecord(
+                category=(
+                    FailureCategory.POLICY_FAILURE
+                    if isinstance(error, (GateError, PolicyError))
+                    else FailureCategory.EXECUTION_FAILURE
+                ),
+                stage=f"attempt_{attempt_number}",
+                retryable=False,
+                message=run.error,
+            )
             if run.attempts and run.attempts[-1].completed_at is None:
                 run.attempts[-1].completed_at = utc_now()
             self.store.save(run)
@@ -124,7 +150,7 @@ class Orchestrator:
         if attempt_number != len(run.attempts) + 1:
             raise GateError("Coding attempts must be sequential")
 
-        scenario = self._scenario(run.scenario_id)
+        scenario = self._scenario_for_run(run)
         worktree = self.worktrees.create(run.run_id, attempt_number, run.base_commit)
         attempt = AttemptRecord(
             number=attempt_number,
@@ -180,6 +206,21 @@ class Orchestrator:
         )
         self.store.save(run)
         attempt.observation = scenario.observer.observe(artifact, context)
+        observed_decisions = {
+            decision.decision_id: decision.option_id for decision in attempt.observation.decisions
+        }
+        attempt.effect_dispositions = classify_effects(
+            attempt.observation.effects,
+            scenario.effect_classifiers,
+            observed_decisions,
+        )
+        attempt.coverage_manifest = build_coverage_manifest(
+            scenario_id=scenario.id,
+            policy_version=scenario.policy_version,
+            policy_digest=run.policy_digest,
+            requirements=scenario.coverage_rules,
+            reported=attempt.observation.coverage,
+        )
         attempt.completed_at = utc_now()
         self.store.save(run)
 
@@ -193,37 +234,25 @@ class Orchestrator:
         observation = run.attempts[0].observation
         if observation is None:
             raise GateError("Attempt one has no observation")
-        expected_ids = {decision.id for decision in scenario.decisions}
-        if set(observation.outcomes) != expected_ids:
-            run.state = RunState.FAILED
-            run.error = "Attempt one did not return exactly the declared decision outcomes"
+        if self._finish_common_evaluation(run, scenario, attempt_number=1):
             return
 
         modeled: list[tuple[DecisionSpec, DecisionOption]] = []
+        observed_by_id = {
+            decision.decision_id: decision.option_id for decision in observation.decisions
+        }
         for decision in scenario.decisions:
-            outcome = observation.outcomes[decision.id]
+            outcome = observed_by_id[decision.id]
             option = option_by_id(decision, outcome)
-            if outcome == UNMODELED_OUTCOME:
-                run.coverage_gaps.append(
-                    CoverageGapRecord(
-                        decision_id=decision.id,
-                        observed=outcome,
-                        attempt_number=1,
-                    )
-                )
-                continue
             if option is None:
-                run.state = RunState.FAILED
-                run.error = (
-                    f"Attempt one returned an undeclared outcome for {decision.id}: {outcome}"
+                self._fail(
+                    run,
+                    FailureCategory.POLICY_FAILURE,
+                    "attempt_1_decisions",
+                    f"Attempt one returned an undeclared outcome for {decision.id}: {outcome}",
                 )
                 return
             modeled.append((decision, option))
-
-        if run.coverage_gaps:
-            run.state = RunState.COVERAGE_GAP
-            run.error = None
-            return
 
         classifications = []
         reviewer_client = self._reviewer_client()
@@ -261,13 +290,19 @@ class Orchestrator:
                 if decision.reviewer_result is not None
                 and decision.reviewer_result.classification is EvidenceClassification.CONTRADICTED
             ]
-            run.error = f"Observed behavior was contradicted for: {', '.join(contradicted)}"
+            self._fail(
+                run,
+                FailureCategory.INVARIANT_VIOLATION,
+                "attempt_1_evidence_review",
+                f"Observed behavior was contradicted for: {', '.join(contradicted)}",
+            )
 
-    @staticmethod
-    def _finish_second_attempt(run: RunRecord, scenario: Scenario) -> None:
+    def _finish_second_attempt(self, run: RunRecord, scenario: Scenario) -> None:
         observation = run.attempts[1].observation
         if observation is None:
             raise GateError("Attempt two has no observation")
+        if self._finish_common_evaluation(run, scenario, attempt_number=2):
+            return
         expected: dict[str, str] = {}
         records = {decision.decision_id: decision for decision in run.decisions}
         for specification in scenario.decisions:
@@ -281,30 +316,179 @@ class Orchestrator:
             else:
                 raise GateError(f"Attempt two has no owner answer: {specification.id}")
 
+        observed_by_id = {
+            decision.decision_id: decision.option_id for decision in observation.decisions
+        }
         mismatches = [
             f"{decision_id}: expected {option}, observed "
-            f"{observation.outcomes.get(decision_id, 'MISSING')}"
+            f"{observed_by_id.get(decision_id, 'MISSING')}"
             for decision_id, option in expected.items()
-            if observation.outcomes.get(decision_id) != option
+            if observed_by_id.get(decision_id) != option
         ]
-        for decision_id in expected:
-            observed = observation.outcomes.get(decision_id)
-            if observed == UNMODELED_OUTCOME:
-                run.coverage_gaps.append(
-                    CoverageGapRecord(
-                        decision_id=decision_id,
-                        observed=observed,
-                        attempt_number=2,
-                    )
-                )
-        extra = sorted(set(observation.outcomes) - set(expected))
-        mismatches.extend(f"{decision_id}: unexpected outcome" for decision_id in extra)
         if not mismatches:
             run.state = RunState.COMPLETED
             run.error = None
+            run.failure = None
         else:
-            run.state = RunState.FAILED
-            run.error = f"Attempt two decision mismatch: {'; '.join(mismatches)}"
+            self._fail(
+                run,
+                FailureCategory.DECISION_MISMATCH,
+                "attempt_2_decisions",
+                f"Attempt two decision mismatch: {'; '.join(mismatches)}",
+            )
+
+    def _finish_common_evaluation(
+        self,
+        run: RunRecord,
+        scenario: Scenario,
+        *,
+        attempt_number: int,
+    ) -> bool:
+        """Apply invariant, effect, and coverage gates shared by both attempts."""
+
+        attempt = run.attempts[attempt_number - 1]
+        observation = attempt.observation
+        manifest = attempt.coverage_manifest
+        if observation is None or manifest is None:
+            raise GateError(f"Attempt {attempt_number} has incomplete evidence")
+        self._validate_observation_contract(observation, scenario)
+
+        violated = [
+            invariant.invariant_id
+            for invariant in observation.invariants
+            if invariant.status is InvariantStatus.VIOLATED
+        ]
+        if violated:
+            self._fail(
+                run,
+                FailureCategory.INVARIANT_VIOLATION,
+                f"attempt_{attempt_number}_invariants",
+                f"Required behavior was violated for: {', '.join(violated)}",
+            )
+            return True
+
+        forbidden = [
+            disposition
+            for disposition in attempt.effect_dispositions
+            if disposition.status is EffectDispositionStatus.FORBIDDEN
+        ]
+        if forbidden:
+            self._fail(
+                run,
+                FailureCategory.FORBIDDEN_EFFECT,
+                f"attempt_{attempt_number}_effects",
+                "Forbidden effects were observed: "
+                + ", ".join(disposition.effect_id for disposition in forbidden),
+            )
+            return True
+
+        failed_coverage = [
+            result.rule_id for result in manifest.results if result.status is CoverageStatus.FAILED
+        ]
+        if failed_coverage:
+            self._fail(
+                run,
+                FailureCategory.EXECUTION_FAILURE,
+                f"attempt_{attempt_number}_coverage",
+                f"Coverage rules failed to execute: {', '.join(failed_coverage)}",
+            )
+            return True
+
+        for unknown in observation.unknown_effects:
+            run.coverage_gaps.append(
+                CoverageGapRecord(
+                    category=CoverageGapCategory.UNKNOWN_EFFECT,
+                    surface_id=unknown.surface_id,
+                    rule_id=unknown.rule_id,
+                    description=unknown.description,
+                    attempt_number=attempt_number,
+                    decision_id=unknown.decision_id,
+                )
+            )
+        for disposition in attempt.effect_dispositions:
+            if disposition.status is not EffectDispositionStatus.UNCLASSIFIED:
+                continue
+            run.coverage_gaps.append(
+                CoverageGapRecord(
+                    category=CoverageGapCategory.UNCLASSIFIED_EFFECT,
+                    surface_id=disposition.effect.rule_id,
+                    rule_id=disposition.effect.rule_id,
+                    description=disposition.reason,
+                    attempt_number=attempt_number,
+                    effect_id=disposition.effect_id,
+                )
+            )
+        requirement_by_id = {requirement.id: requirement for requirement in manifest.requirements}
+        for result in manifest.results:
+            if result.status is not CoverageStatus.MISSING:
+                continue
+            requirement = requirement_by_id[result.rule_id]
+            run.coverage_gaps.append(
+                CoverageGapRecord(
+                    category=CoverageGapCategory.MISSING_COVERAGE,
+                    surface_id=requirement.surface_id,
+                    rule_id=requirement.id,
+                    description=f"Required observer rule did not report evidence: {requirement.id}",
+                    attempt_number=attempt_number,
+                )
+            )
+        if run.coverage_gaps:
+            run.state = RunState.COVERAGE_GAP
+            run.error = None
+            run.failure = None
+            return True
+        return False
+
+    @staticmethod
+    def _validate_observation_contract(
+        observation: ObservationResult,
+        scenario: Scenario,
+    ) -> None:
+        invariant_ids = [invariant.invariant_id for invariant in observation.invariants]
+        if len(invariant_ids) != len(set(invariant_ids)) or set(invariant_ids) != set(
+            scenario.invariant_ids
+        ):
+            raise GateError("Observer did not return exactly the declared invariants")
+
+        observed_ids = [decision.decision_id for decision in observation.decisions]
+        unknown_ids = [
+            unknown.decision_id
+            for unknown in observation.unknown_effects
+            if unknown.decision_id is not None
+        ]
+        if len(observed_ids) != len(set(observed_ids)) or len(unknown_ids) != len(set(unknown_ids)):
+            raise GateError("Observer returned duplicate decision evidence")
+        if set(observed_ids) & set(unknown_ids):
+            raise GateError("Observer returned modeled and unknown evidence for one decision")
+        expected_ids = {decision.id for decision in scenario.decisions}
+        if set(observed_ids) | set(unknown_ids) != expected_ids:
+            raise GateError("Observer did not account for exactly the declared decisions")
+        options_by_decision = {
+            decision.id: {option.id for option in decision.options}
+            for decision in scenario.decisions
+        }
+        for decision in observation.decisions:
+            if decision.option_id not in options_by_decision[decision.decision_id]:
+                raise GateError(
+                    f"Observer returned an undeclared option for {decision.decision_id}: "
+                    f"{decision.option_id}"
+                )
+
+    @staticmethod
+    def _fail(
+        run: RunRecord,
+        category: FailureCategory,
+        stage: str,
+        message: str,
+    ) -> None:
+        run.state = RunState.FAILED
+        run.error = message
+        run.failure = FailureRecord(
+            category=category,
+            stage=stage,
+            retryable=False,
+            message=message,
+        )
 
     @staticmethod
     def _write_worktree_artifact(
@@ -332,6 +516,18 @@ class Orchestrator:
             return self.scenarios[scenario_id]
         except KeyError as error:
             raise GateError(f"Unknown scenario: {scenario_id}") from error
+
+    def _scenario_for_run(self, run: RunRecord) -> Scenario:
+        """Resolve a scenario only when its current policy matches the durable run."""
+
+        scenario = self._scenario(run.scenario_id)
+        snapshot = scenario_policy_snapshot(scenario)
+        digest = scenario_policy_digest(snapshot)
+        if digest != run.policy_digest or snapshot != run.policy_snapshot:
+            raise GateError(
+                "The current scenario policy differs from the immutable policy for this run"
+            )
+        return scenario
 
     def _coding_client(self) -> CodingClient:
         if self.coding_client is None:

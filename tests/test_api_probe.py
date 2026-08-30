@@ -13,7 +13,9 @@ from implicit_decision_gate.api_probe import (
     ADMINISTRATOR_ACCESS,
     CONTAINER_TIMEOUT_SECONDS,
     CREATE_ANOTHER_EXPORT,
+    MEMBER_DENIAL_INVARIANT,
     OWNER_AND_ADMIN,
+    OWNER_FIRST_REQUEST_INVARIANT,
     OWNER_ONLY,
     PROBE_TIMEOUT_SECONDS,
     REPEAT_REQUEST,
@@ -23,7 +25,7 @@ from implicit_decision_gate.api_probe import (
     RoleResult,
     normalize_authorization,
 )
-from implicit_decision_gate.scenario import UNMODELED_OUTCOME
+from implicit_decision_gate.scenario import CoverageStatus, InvariantStatus
 
 OWNER = RoleResult(status=202, jobs_created=1)
 DENIED = RoleResult(status=403, jobs_created=0)
@@ -32,52 +34,81 @@ INVALID = RoleResult(status=500, jobs_created=0)
 
 
 @pytest.mark.parametrize(
-    ("observation", "administrator_outcome", "repeat_outcome"),
+    ("observation", "expected_decisions", "unknown_decisions", "violated_invariants"),
     [
-        (AuthorizationObservation(OWNER, OWNER, DENIED, DENIED), OWNER_ONLY, CREATE_ANOTHER_EXPORT),
-        (AuthorizationObservation(OWNER, REUSED, DENIED, DENIED), OWNER_ONLY, REUSE_ACTIVE_EXPORT),
+        (
+            AuthorizationObservation(OWNER, OWNER, DENIED, DENIED),
+            {ADMINISTRATOR_ACCESS: OWNER_ONLY, REPEAT_REQUEST: CREATE_ANOTHER_EXPORT},
+            set(),
+            set(),
+        ),
+        (
+            AuthorizationObservation(OWNER, REUSED, DENIED, DENIED),
+            {ADMINISTRATOR_ACCESS: OWNER_ONLY, REPEAT_REQUEST: REUSE_ACTIVE_EXPORT},
+            set(),
+            set(),
+        ),
         (
             AuthorizationObservation(OWNER, OWNER, OWNER, DENIED),
-            OWNER_AND_ADMIN,
-            CREATE_ANOTHER_EXPORT,
+            {ADMINISTRATOR_ACCESS: OWNER_AND_ADMIN, REPEAT_REQUEST: CREATE_ANOTHER_EXPORT},
+            set(),
+            set(),
         ),
         (
             AuthorizationObservation(OWNER, REUSED, OWNER, DENIED),
-            OWNER_AND_ADMIN,
-            REUSE_ACTIVE_EXPORT,
+            {ADMINISTRATOR_ACCESS: OWNER_AND_ADMIN, REPEAT_REQUEST: REUSE_ACTIVE_EXPORT},
+            set(),
+            set(),
         ),
         (
             AuthorizationObservation(OWNER, OWNER, INVALID, DENIED),
-            UNMODELED_OUTCOME,
-            CREATE_ANOTHER_EXPORT,
+            {REPEAT_REQUEST: CREATE_ANOTHER_EXPORT},
+            {ADMINISTRATOR_ACCESS},
+            set(),
         ),
         (
             AuthorizationObservation(OWNER, INVALID, DENIED, DENIED),
-            OWNER_ONLY,
-            UNMODELED_OUTCOME,
+            {ADMINISTRATOR_ACCESS: OWNER_ONLY},
+            {REPEAT_REQUEST},
+            set(),
         ),
         (
             AuthorizationObservation(OWNER, OWNER, DENIED, INVALID),
-            UNMODELED_OUTCOME,
-            CREATE_ANOTHER_EXPORT,
+            {ADMINISTRATOR_ACCESS: OWNER_ONLY, REPEAT_REQUEST: CREATE_ANOTHER_EXPORT},
+            set(),
+            {MEMBER_DENIAL_INVARIANT},
         ),
         (
             AuthorizationObservation(INVALID, OWNER, DENIED, DENIED),
-            UNMODELED_OUTCOME,
-            UNMODELED_OUTCOME,
+            {ADMINISTRATOR_ACCESS: OWNER_ONLY, REPEAT_REQUEST: CREATE_ANOTHER_EXPORT},
+            set(),
+            {OWNER_FIRST_REQUEST_INVARIANT},
         ),
     ],
 )
 def test_normalize_authorization(
     observation: AuthorizationObservation,
-    administrator_outcome: str,
-    repeat_outcome: str,
+    expected_decisions: dict[str, str],
+    unknown_decisions: set[str],
+    violated_invariants: set[str],
 ) -> None:
     result = normalize_authorization(observation)
 
-    assert result.outcomes == {
-        ADMINISTRATOR_ACCESS: administrator_outcome,
-        REPEAT_REQUEST: repeat_outcome,
+    assert {
+        decision.decision_id: decision.option_id for decision in result.decisions
+    } == expected_decisions
+    assert {
+        unknown.decision_id for unknown in result.unknown_effects if unknown.decision_id is not None
+    } == unknown_decisions
+    assert {
+        invariant.invariant_id
+        for invariant in result.invariants
+        if invariant.status is InvariantStatus.VIOLATED
+    } == violated_invariants
+    assert {coverage.status for coverage in result.coverage} == {CoverageStatus.PASSED}
+    assert {invariant.invariant_id for invariant in result.invariants} == {
+        OWNER_FIRST_REQUEST_INVARIANT,
+        MEMBER_DENIAL_INVARIANT,
     }
     assert result.facts == {
         "owner_status": observation.owner.status,
@@ -141,7 +172,7 @@ def test_docker_observer_parses_output_with_execution_limits(
         "timeout": PROBE_TIMEOUT_SECONDS,
         "check": False,
     }
-    assert result.outcomes == {
+    assert {decision.decision_id: decision.option_id for decision in result.decisions} == {
         ADMINISTRATOR_ACCESS: OWNER_ONLY,
         REPEAT_REQUEST: REUSE_ACTIVE_EXPORT,
     }

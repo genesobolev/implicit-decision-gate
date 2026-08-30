@@ -3,7 +3,7 @@ flowchart LR
     git[Git pinned brief and context]
     orchestrator[Implicit Decision Gate]
     coder[Fresh Codex coding process]
-    observer[Disposable behavior observer]
+    observer[Disposable typed observer]
     reviewer[Fresh Codex evidence reviewer]
     store[Durable run store]
     platform[Later platform engineering review]
@@ -15,12 +15,12 @@ flowchart LR
     orchestrator -->|Coding prompt| coder
     coder -->|Generated artifact| orchestrator
     orchestrator -->|Artifact and context| observer
-    observer -->|Normalized observed outcomes| orchestrator
-    orchestrator -->|Covered outcomes and brief| reviewer
+    observer -->|Typed attempt evidence| orchestrator
+    orchestrator -->|Owner decisions and brief| reviewer
     reviewer -->|Evidence classifications| orchestrator
     orchestrator -->|Missing product decisions| owner
     owner -->|Typed owner decisions| orchestrator
-    orchestrator -->|Persist run state and evidence| store
+    orchestrator -->|Persist typed run evidence| store
     store -.->|Coverage events for later review| platform
     orchestrator -->|Verified completion| verified
     trust -.->|Identity tools evidence permissions| orchestrator

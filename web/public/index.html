@@ -86,6 +86,19 @@
                         </div>
                     </div>
 
+                    <details class="robustness-routes">
+                        <summary>Robustness cases</summary>
+                        <div>
+                            <p>Inspect policy failures after the primary decision workflow is clear.</p>
+                            <div class="robustness-route-switch" role="group" aria-label="Robustness replay route">
+                                <button type="button" data-robustness-route="invariant_violation" aria-pressed="false">Invariant violation</button>
+                                <button type="button" data-robustness-route="forbidden_effect" aria-pressed="false">Forbidden effect</button>
+                                <button type="button" data-robustness-route="missing_coverage" aria-pressed="false">Missing coverage</button>
+                                <button type="button" data-robustness-route="attempt2_unclassified" aria-pressed="false">Attempt-two side effect</button>
+                            </div>
+                        </div>
+                    </details>
+
                     <div class="stage-rail" id="stage-rail" aria-label="Run stages"></div>
                     <div class="replay-path" id="replay-path" role="region" aria-label="Graph route for selected replay"></div>
                     <div class="stage-content" id="stage-content" aria-live="polite"></div>

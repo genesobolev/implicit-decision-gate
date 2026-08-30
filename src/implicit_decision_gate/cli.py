@@ -10,7 +10,7 @@ from pathlib import Path
 
 from implicit_decision_gate.api_probe import DockerAuthorizationProbe
 from implicit_decision_gate.codex_client import CodexCLIModelClient
-from implicit_decision_gate.gate import GateError, RunState, render_show
+from implicit_decision_gate.gate import GateError, RunState
 from implicit_decision_gate.orchestrator import Orchestrator
 from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN, PostgresProbe
 from implicit_decision_gate.scenarios import (
@@ -72,9 +72,7 @@ def _state_orchestrator(repo_path: Path) -> Orchestrator:
 
 
 def _render(orchestrator: Orchestrator, run_id: str) -> str:
-    run = orchestrator.store.load(run_id)
-    scenario = orchestrator.scenarios[run.scenario_id]
-    return render_show(run, scenario.decisions)
+    return orchestrator.show(run_id)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

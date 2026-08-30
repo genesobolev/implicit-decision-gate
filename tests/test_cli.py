@@ -22,7 +22,11 @@ from implicit_decision_gate.gate import (
     ModelRole,
     ReviewerResult,
 )
-from implicit_decision_gate.probe import COMPOSE_ADMIN_DSN, EXISTING_LINK_ROLLOUT
+from implicit_decision_gate.probe import (
+    COMPOSE_ADMIN_DSN,
+    EXISTING_LINK_ROLLOUT,
+    POSTGRES_EXISTING_LINK_COVERAGE,
+)
 from implicit_decision_gate.scenarios import WORKSPACE_EXPORT_AUTHORIZATION
 from tests.conftest import ScriptMarkerProbe
 
@@ -261,8 +265,9 @@ def test_cli_reports_coverage_gap_without_an_execution_error(
     assert gap["run_id"] == started["run_id"]
     assert gap["scenario"] == started["scenario"]
     assert gap["base_commit"]
+    assert gap["category"] == "UNKNOWN_EFFECT"
+    assert gap["rule_id"] == POSTGRES_EXISTING_LINK_COVERAGE
     assert gap["decision_id"] == "existing_item_sharing_link_rollout"
-    assert gap["observed"] == "UNMODELED"
     assert gap["facts"]["existing_row"] == "other"
     assert gap["artifact_digest"] == started["attempt_digests"][0]
     assert started["final_worktree_path"] is not None
